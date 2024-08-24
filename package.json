@@ -1,0 +1,33 @@
+{
+  "name": "@mujurin/nicolive-api-ts",
+  "version": "0.0.1",
+  "description": "ニコニコ生放送のAPIを纏めたクライアントライブラリ",
+  "main": "build/index.js",
+  "typings": "build/index.d.ts",
+  "type": "module",
+  "author": {
+    "name": "mujurin"
+  },
+  "scripts": {
+    "build": "npm run clean && tsc",
+    "build:proto": "buf generate",
+    "pack": "npm run build && npm pack",
+    "dev": "tsx --watch src/index.ts",
+    "doc": "typedoc --out ./doc",
+    "clean": "rimraf build && rimraf doc"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "^1.35.1",
+    "@bufbuild/protoc-gen-es": "^2.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.2.0",
+    "@typescript-eslint/parser": "^8.2.0",
+    "eslint": "^9.9.0",
+    "eslint-plugin": "^1.0.1",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.2.0"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.0.0"
+  }
+}

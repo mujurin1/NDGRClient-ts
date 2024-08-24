@@ -1,0 +1,7 @@
+node_modules/
+build/
+nicolive-docs/
+
+.vscode
+**.*.zip
+**.*.tgz
