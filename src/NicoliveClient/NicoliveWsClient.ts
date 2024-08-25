@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import type { NicoliveStream, NicoliveWsReceiveMessage, NicoliveWsSendMessage, NicoliveWsSendStartWatching } from "./NicoliveWsClientType";
 import type { INicoliveClient } from "./type";
 
@@ -8,12 +9,14 @@ export class NicoliveWsClient {
    * @param receiver メッセージを通知する相手
    * @param websocketUrl 接続するWebSocketURL
    * @param nicoliveStream 映像を受信する場合に指定する
-   * @param reconnect 再接続する場合は`true` @default false
+   * @param reconnect 再接続の場合は`true`\
+   * {@link NicoliveWsSendStartWatching} の`stream`に利用される
+   * @default false
    */
   constructor(
     private readonly receiver: INicoliveClient,
-    public readonly websocketUrl: string,
-    public readonly nicoliveStream?: NicoliveStream,
+    readonly websocketUrl: string,
+    private readonly nicoliveStream?: NicoliveStream,
     private readonly reconnect = false,
   ) {
     this._ws = new WebSocket(websocketUrl);
@@ -46,19 +49,16 @@ export class NicoliveWsClient {
     this._ws.close();
 
     if (reconnection) this.receiver.onWsState.emit("reconnecting");
-    else this.receiver.onWsState.emit("disconnect");
+    else this.receiver.onWsState.emit("disconnected");
   }
 
   private readonly onOpen = () => {
-    if (this.reconnect) this.receiver.onWsState.emit("reconnnected");
-    else this.receiver.onWsState.emit("open");
+    this.receiver.onWsState.emit("opened");
 
-    const message: NicoliveWsSendStartWatching = { type: "startWatching", data: { reconnect: this.reconnect } };
-    if (this.nicoliveStream != null) {
-      message.data.stream = this.nicoliveStream;
-    }
-
-    this.send(message);
+    this.send({
+      type: "startWatching",
+      data: { reconnect: this.reconnect, stream: this.nicoliveStream }
+    });
   };
 
   private readonly onMessage = (e: MessageEvent) => {
@@ -76,15 +76,14 @@ export class NicoliveWsClient {
 
   private readonly onClose = () => {
     // 接続が正常に終了した場合はこの関数はウェブソケットから呼び出されない
-
-    this.receiver.onWsState.emit("disconnect");
+    this.receiver.onWsState.emit("disconnected");
     this.stopKeepInterval();
   };
 
   private keepIntervalId?: number;
 
   /**
-   * 接続を維持するために必要
+   * 接続を維持するために必要なインターバルを送信する
    * @param keepIntervalSec インターバル秒
    */
   private startKeepInterval(keepIntervalSec: number) {

@@ -19,3 +19,9 @@ export async function sleep(ms: number) {
   if (ms <= 0) return;
   return new Promise(res => setTimeout(res, ms));
 }
+
+export function promiser<T>(): [Promise<T>, (value: T) => void] {
+  let resolver: (value: T) => void = null!;
+  const promise = new Promise<T>((resolve => resolver = resolve));
+  return [promise, resolver] as const;
+}

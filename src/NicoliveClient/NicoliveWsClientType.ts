@@ -14,7 +14,6 @@ export type NicoliveWsSendMessage =
   | NicoliveWsSendGetTaxonomy
   | NicoliveWsSendGetStreamQualities;
 
-
 /**
  * 視聴開始時に必要な情報を求めるメッセージ\
  * 成功の場合はストリームやメッセージサーバー情報など複数メッセージが順番で返されます\
@@ -26,7 +25,7 @@ export interface NicoliveWsSendStartWatching {
     /** 映像が必要な時のみ指定する必要がある */
     stream?: NicoliveStream;
     /**
-     * 座席再利用するかどうかの真偽値
+     * 座席再利用するか
      * * 未指定時は `false`
      * * `true`の場合は前回取得したストリームを再利用する
      */

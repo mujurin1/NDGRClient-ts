@@ -4,9 +4,9 @@ export * from "./lib/EventEmitter";
 export * from "./lib/EventTrigger";
 export * from "./lib/utils";
 
-export * from "./nicolive/NicoliveClient";
-export * from "./nicolive/NicoliveMessageClient";
-export * from "./nicolive/NicoliveWsClient";
-export * from "./nicolive/NicoliveWsClientType";
-export * from "./nicolive/type";
-export * from "./nicolive/utils";
+export * from "./NicoliveClient/NicoliveClient";
+export * from "./NicoliveClient/NicoliveMessageClient";
+export * from "./NicoliveClient/NicoliveWsClient";
+export * from "./NicoliveClient/NicoliveWsClientType";
+export * from "./NicoliveClient/type";
+export * from "./NicoliveClient/utils";

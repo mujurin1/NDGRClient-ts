@@ -1,18 +1,36 @@
 import type * as dwango from "../gen/dwango_pb";
 import { EventEmitter } from "../lib/EventEmitter";
 import { EventTrigger } from "../lib/EventTrigger";
+import { promiser, sleep } from "../lib/utils";
 import { NicoliveMessageClient } from "./NicoliveMessageClient";
 import { NicoliveWsClient } from "./NicoliveWsClient";
-import type { INicoliveClient, NicoliveWsReceiveMessageType } from "./type";
+import type { INicoliveClient, NicoliveClientLog, NicoliveClientState, NicoliveWsReceiveMessageType } from "./type";
 import { type NicoliveId, NicoliveWatchError, getNicoliveId } from "./utils";
 
 export class NicoliveClient implements INicoliveClient {
+  /**
+   * ネットワークエラーが発生した時に再接続するインターバル\
+   * 再接続されるまでトライする`n`回目の待機時間`n:value`
+   */
+  private readonly _reconnectIntervalsSec = [5, 10, 15, 30, 30] as const;
+  /** 再接続中か */
+  private _reconnecting = false;
+
+  /**
+   * 最後に受信したメッセージ\
+   * 再接続時に使うため
+   */
+  private _lastFetchMessage: dwango.ChunkedMessage | undefined;
+
+  public onState = new EventTrigger<[NicoliveClientState]>();
   public wsClient: NicoliveWsClient;
   public messageClient?: NicoliveMessageClient;
 
-  public readonly onWsState = new EventTrigger<["open" | "reconnecting" | "reconnnected" | "disconnect"]>();
+  public readonly onWsState = new EventTrigger<["opened" | "reconnecting" | "disconnected"]>();
+  public readonly onLog = new EventEmitter<NicoliveClientLog>();
+
   public readonly onWsMessage = new EventEmitter<NicoliveWsReceiveMessageType>();
-  public readonly onMessageState = new EventTrigger<["open" | "disconnect"]>();
+  public readonly onMessageState = new EventTrigger<["opened" | "disconnected"]>();
   public readonly onMessageEntry = new EventTrigger<[dwango.ChunkedEntry["entry"]["case"] & {}]>();
   public readonly onMessage = new EventTrigger<[dwango.ChunkedMessage]>();
   public readonly onMessageOld = new EventTrigger<[dwango.ChunkedMessage[]]>();
@@ -27,11 +45,8 @@ export class NicoliveClient implements INicoliveClient {
   public beginTime: Date;
   public endTime: Date;
 
-  /**
-   * 全ての過去メッセージを受信しているか
-   */
-  public getAllReceivedBackward(): boolean {
-    return this.messageClient?.getAllReceivedBackward() ?? false;
+  public canFetchBackwardMessage(): boolean {
+    return this.messageClient?.backwardUri != null;
   }
 
 
@@ -60,12 +75,12 @@ export class NicoliveClient implements INicoliveClient {
     this.beginTime = new Date(pageData.beginTime * 1e3);
     this.endTime = new Date(pageData.endTime * 1e3);
 
-    // TODO: fromSec を変える必要があるか調べる
-    if (pageData.status === "ENDED") {
-      fromSec = Math.floor(this.endTime.getTime() / 1e3);
-    }
-
     this.wsClient = new NicoliveWsClient(this, this.websocketUrl);
+
+    /** 再接続時に取得するメッセージの時刻. UNIX TIME (秒単位) */
+    let reconnectTime: bigint | "now" | undefined;
+
+    this.onState.emit("connecting");
 
     this.onWsMessage
       .on("schedule", data => {
@@ -74,33 +89,81 @@ export class NicoliveClient implements INicoliveClient {
         this.endTime = new Date(data.end);
       })
       .on("messageServer", data => {
-        this.messageClient = new NicoliveMessageClient(this, data.viewUri, isSnapshot);
+        let skipTo: string | undefined;
 
-        void this.messageClient.connect(fromSec, minBackwards);
+        // `this._reconnecting === true`なら必ず`this.messageClient != null`
+        if (!this._reconnecting || this.messageClient == null) {
+          this.messageClient = new NicoliveMessageClient(this, data.viewUri, isSnapshot);
+        } else {
+          // 再接続時には取得する開始の時刻, それ以前は不要 で取得開始する
+          if (typeof reconnectTime === "bigint") fromSec = Number(reconnectTime);
+          minBackwards = 1; // 0 だと最後のメッセージがチャンクの最後だった場合に恐らくメッセージを受信できない
+          skipTo = this._lastFetchMessage?.meta?.id;
+        }
+
+        this.messageClient.connect(fromSec, minBackwards, skipTo)
+          .catch(async (e: unknown) => {
+            if (!(e instanceof Error)) {
+              this.onLog.emit("error", { type: "unknown_error", error: e });
+              throw e;
+            }
+
+            if (e.message === "Failed to fetch") {
+              // ネットワーク障害時に再接続する
+              this._reconnecting = true;
+              reconnectTime = this.messageClient!.currentNext;
+
+              this.onState.emit("reconnecting");
+              this.wsClient.close(true);
+
+              for (const intervalSec of this._reconnectIntervalsSec) {
+                this.onLog.emit("info", { type: "reconnect", sec: intervalSec });
+                await sleep(intervalSec * 1e3);
+
+                const succsessed = await this.reconnect();
+
+                if (succsessed) {
+                  this.onLog.emit("info", { type: "reconnect" });
+                  return;
+                }
+              }
+
+              this.onLog.emit("error", { type: "reconnect_failed" });
+              this.close();
+            } else throw e;
+          });
       })
       .on("reconnect", ({ audienceToken, waitTimeSec }) => {
         // MEMO: この関数は全くテストをしていません
+        this.onLog.emit(
+          "info",
+          { type: "any", message: `ウェブソケットの再接続要求を受け取りました\n${waitTimeSec * 1e3}秒後にウェブソケットを切断して再接続します` }
+        );
         this.websocketUrl = replaceToken(this.websocketUrl, audienceToken);
 
-        setTimeout(() => {
-          // this.onWsState.once(message => {
-          //   if (message === "reconnnected") { }
-          // });
+        setTimeout(async () => {
+          this._reconnecting = true;
+          this.onState.emit("reconnecting");
 
-          this.wsClient.close(true);
-          this.wsClient = new NicoliveWsClient(
-            this,
-            this.websocketUrl,
-            undefined,
-            true,
-          );
+          if (await this.reconnect()) {
+            this.onLog.emit("info", { type: "reconnect" });
+          } else {
+            this.onLog.emit("error", { type: "reconnect_failed" });
+            this.close();
+          }
         }, waitTimeSec * 1e3);
       });
 
-    this.onMessageState
-      .on(event => {
-        if (event === "disconnect") this.wsClient.close();
-      });
+    this.onWsState.on(event => {
+      if (event === "disconnected") this.close();
+    });
+    this.onMessageState.on(event => {
+      if (event === "opened") this.onState.emit("opened");
+      else this.close();
+    });
+
+    this.onMessage.on(message => this._lastFetchMessage = message);
+    this.onMessageOld.on(messages => this._lastFetchMessage = messages.at(-1));
   }
 
   /**
@@ -118,10 +181,6 @@ export class NicoliveClient implements INicoliveClient {
     return new NicoliveClient(pageData, fromSec, minBackwards, isSnapshot);
   }
 
-  /**
-   * 過去メッセージを取得する
-   * @param minBackwards 取得する過去コメントの最低数
-   */
   public async fetchBackwardMessages(minBackwards: number) {
     if (this.messageClient == null) return;
 
@@ -129,16 +188,48 @@ export class NicoliveClient implements INicoliveClient {
   }
 
   public close() {
+    if (this._reconnecting) {
+      this.onState.emit("reconnect_failed");
+    } else {
+      this._reconnecting = false;
+      this.onState.emit("disconnected");
+    }
+
     this.wsClient.close();
     this.messageClient?.close();
   }
+
+  /**
+   * ウェブソケットに再接続する
+   * @returns 再接続に成功したか
+   */
+  private async reconnect() {
+    this.wsClient = new NicoliveWsClient(
+      this,
+      this.websocketUrl,
+      undefined,
+      true
+    );
+
+    const [promise, resolver] = promiser<boolean>();
+    this.onState.onoff(message => {
+      if (message === "opened") resolver(true);
+      else if (message === "reconnect_failed") resolver(false);
+      else return;
+
+      return true;
+    });
+
+    if (await promise) {
+      this._reconnecting = false;
+      return true;
+    } else return false;
+  }
 }
 
-export type NicoliveFetchData = UnwrapPromise<ReturnType<typeof fetchLivePageData>>;
-
-
-
-
+/**
+ * ニコ生視聴ページから取得するデータ
+ */
 export interface NicolivePageData {
   liveId: NicoliveId;
   title: string;
@@ -205,5 +296,3 @@ function throwIsNull<T>(value: T | undefined, error?: string): T {
   if (value == null) throw new Error(error);
   return value;
 }
-
-type UnwrapPromise<T> = T extends Promise<infer U> ? U : T;

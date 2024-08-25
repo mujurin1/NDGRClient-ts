@@ -8,25 +8,31 @@ import { readProtobufStream } from "./utils";
  * ニコ生メッセージサーバーと接続するクライアント
  */
 export class NicoliveMessageClient {
+  private _connecting = false;
+
+  /** このIDのメッセージまで通知しない */
+  private _skipTo: string | undefined;
+
+  private _nextAt: bigint | "now" | undefined;
   /** backward, previous を無視するかどうか */
   private _skippingBackwards = false;
-  private _nextAtSec: bigint | "now" | undefined;
   /** 接続を外部から終了する場合に`true`になる */
   private _closeReservation = false;
   /** 過去コメントを取得中か */
   private _fetchingBackwardMessage = false;
+  /** 過去メッセージを受信するためのURI */
+  private _backwardUri: string | undefined = "--not-connect";
+
 
   /**
-   * 過去メッセージを受信するためのURI
+   * 過去メッセージを受信するためのURI\
+   * `undefined`の場合は取得していない過去メッセージがない
    */
-  private backwardUri: string | undefined = "--not-connect";
-
+  public get backwardUri() { return this._backwardUri; }
   /**
-   * 全ての過去メッセージを受信しているか
+   * コメントを受信する時刻の最終時刻
    */
-  public getAllReceivedBackward() {
-    return this.backwardUri == null;
-  }
+  public currentNext: bigint | "now" | undefined;
 
   /**
    * @param receiver メッセージを通知する相手
@@ -43,28 +49,38 @@ export class NicoliveMessageClient {
    * ニコ生メッセージ(コメント)サーバーに接続する
    * @param fromSec コメントを取得したい時点の UNIX TIME (秒単位). リアルタイムなら`"now"`を指定
    * @param minBackwards 接続時に取得する過去コメントの最低数
+   * @param skipTo 指定したIDのメッセージの次までスキップする (このIDの次のメッセージから通知される)
    */
-  public async connect(fromSec: number | "now", minBackwards: number) {
+  public async connect(fromSec: number | "now", minBackwards: number, skipTo?: string) {
+    if (this._connecting) throw new Error("すでに接続しています");
+
+    this._closeReservation = false;
+    this._skipTo = skipTo;
+    this._connecting = true;
+
     if (typeof fromSec === "string") {
-      this._nextAtSec = fromSec;
+      this._nextAt = fromSec;
     } else {
       const at = Math.floor(fromSec);
-      this._nextAtSec = BigInt(at);
+      this._nextAt = BigInt(at);
     }
 
-    this.receiver.onMessageState.emit("open");
+    this.receiver.onMessageState.emit("opened");
 
-    main: while (this._nextAtSec != null) {
-      const current_next: bigint | "now" = this._nextAtSec;
-      this._nextAtSec = undefined;
+    try {
+      main: while (this._nextAt != null) {
+        this.currentNext = this._nextAt;
+        this._nextAt = undefined;
 
-      for await (const entry of readProtobufStream(`${this.uri}?at=${current_next}`, dwango.ChunkedEntrySchema)) {
-        if (this._closeReservation) break main;
-        await this.receiveEntry(entry, minBackwards);
+        for await (const entry of readProtobufStream(`${this.uri}?at=${this.currentNext}`, dwango.ChunkedEntrySchema)) {
+          if (this._closeReservation) break main;
+          await this.receiveEntry(entry, minBackwards);
+        }
       }
+    } finally {
+      this._connecting = false;
+      this.receiver.onMessageState.emit("disconnected");
     }
-
-    this.receiver.onMessageState.emit("disconnect");
   }
 
   /**
@@ -82,8 +98,7 @@ export class NicoliveMessageClient {
     if (case_ === "next") {
       // MEMO: 放送終了後の時刻でもnextは来る (24/08/24 現在)
       //       そのため終了しないと永遠と次のチャンクを取得し続けることになる
-      this._nextAtSec = value.at;
-
+      this._nextAt = value.at;
     } else if (case_ === "segment") {
       this._skippingBackwards = true;
       // ?at=time 以降のメッセージ (from ~ until 間)
@@ -91,7 +106,7 @@ export class NicoliveMessageClient {
     } else if (!this._skippingBackwards) {
       // ?at=time 以前のメッセージ (~ from)
       if (case_ === "backward") {
-        this.backwardUri = (this.isSnapshot ? value.snapshot : value.segment)?.uri;
+        this._backwardUri = (this.isSnapshot ? value.snapshot : value.segment)?.uri;
 
         if (value.segment != null) {
           // 全てのメッセージを取得
@@ -109,17 +124,41 @@ export class NicoliveMessageClient {
   }
 
   private receiveMessage(message: dwango.ChunkedMessage) {
+    if (this._skipTo != null && message.meta != null) {
+      if (this._skipTo === message.meta.id) this._skipTo = undefined;
+      return;
+    }
+
+    if (this.checkCloseMessage(message)) this.close();
+
     this.receiver.onMessage.emit(message);
   }
 
   private receiveMessageOld(messages: dwango.ChunkedMessage[]) {
+    for (const message of messages) {
+      if (this._skipTo != null && message.meta != null) {
+        if (this._skipTo !== message.meta.id) return;
+        this._skipTo = undefined;
+      }
+    }
+
+    const last = messages.at(-1);
+    if (this.checkCloseMessage(last)) this.close();
+
     this.receiver.onMessageOld.emit(messages);
+  }
+
+  private checkCloseMessage(message?: dwango.ChunkedMessage) {
+    return (
+      message != null &&
+      message.payload.case === "state" &&
+      message.payload.value.programStatus?.state === dwango.ProgramStatus_State.Ended
+    );
   }
 
   private async fetchMessages(uri: string) {
     for await (const msg of readProtobufStream(uri, dwango.ChunkedMessageSchema)) {
       if (this._closeReservation) return;
-      if (msg.payload.case === "state" && msg.payload.value.programStatus?.state === dwango.ProgramStatus_State.Ended) this.close();
       this.receiveMessage(msg);
     }
   }
@@ -130,7 +169,7 @@ export class NicoliveMessageClient {
    */
   public async fetchBackwardMessages(minBackwards: number) {
     if (this._fetchingBackwardMessage) return;
-    if (this.backwardUri == null) return;
+    if (this._backwardUri == null) return;
     if (minBackwards === 0) return;
 
     this._fetchingBackwardMessage = true;
@@ -139,7 +178,7 @@ export class NicoliveMessageClient {
     let length = 0;
 
     while (true) {
-      const resp = await fetch(this.backwardUri);
+      const resp = await fetch(this._backwardUri);
       const body = new Uint8Array(await resp.arrayBuffer());
       const packed = protobuf.fromBinary(dwango.PackedSegmentSchema, body);
 
@@ -148,10 +187,10 @@ export class NicoliveMessageClient {
 
       // MEMO: こっちは segment ではなく next になっている
       //       途中から snapshot に変えた場合はそれ以降 next の値が snapshot と同じURIになったりする‥？
-      this.backwardUri = (this.isSnapshot ? packed.snapshot : packed.next)?.uri;
+      this._backwardUri = (this.isSnapshot ? packed.snapshot : packed.next)?.uri;
 
       if (length >= minBackwards) break;
-      if (this.backwardUri == null) break;
+      if (this._backwardUri == null) break;
 
       await sleep(7);
     }

@@ -12,6 +12,13 @@ export interface IEventEmitter<Events extends Record<string, unknown[]>> {
   on<K extends keyof Events>(event: K, listener: Listener<Events, K>): this;
 
   /**
+   * `true` を返すと自身を取り除くイベントリスナーを登録する
+   * @param event イベント名
+   * @param listener イベントリスナー
+   */
+  onoff<K extends keyof Events>(event: K, listener: Listener<Events, K, boolean | void>): this;
+
+  /**
    * イベントリスナーを削除する
    * @param event イベント名
    * @param listener イベントリスナー
@@ -51,24 +58,30 @@ export class EventEmitter<Events extends Record<string, unknown[]>> implements I
     return this;
   }
 
+  public onoff<K extends keyof Events>(event: K, listener: Listener<Events, K, boolean | void>) {
+    return this.on(event, listener as unknown as Listener<Events, K>);
+  }
+
   public off<K extends keyof Events>(event: K, listener: Listener<Events, K>) {
     const callbacks = this.callbacksMap.get(event);
     if (callbacks === undefined)
       return this;
+
     callbacks.delete(listener);
     if (callbacks.size === 0) {
       this.callbacksMap.delete(event);
     }
+
     return this;
   }
 
   public once<K extends keyof Events>(event: K, listener: Listener<Events, K>) {
-    const onceListener: typeof listener = (...args) => {
-      this.off(event, onceListener);
+    const onceListener: Listener<Events, K, true> = (...args) => {
       listener(...args);
+      return true;
     };
 
-    return this.on(event, onceListener);
+    return this.onoff(event, onceListener);
   }
 
   public emit<K extends keyof Events>(event: K, ...args: Events[K]) {
@@ -78,9 +91,23 @@ export class EventEmitter<Events extends Record<string, unknown[]>> implements I
     if (callbacks === undefined) {
       return false;
     }
+
+    const offCallbacks: any[] = [];
     for (const callback of callbacks) {
-      callback(...args);
+      if (callback(...args) === true) {
+        offCallbacks.push(callback);
+      }
     }
+
+    if (offCallbacks.length > 0) {
+      for (const callback of offCallbacks) {
+        callbacks.delete(callback);
+      }
+      if (callbacks.size === 0) {
+        this.callbacksMap.delete(event);
+      }
+    }
+
     return true;
   }
 
@@ -110,7 +137,8 @@ export class EventEmitter<Events extends Record<string, unknown[]>> implements I
 type Listener<
   Events extends Record<string, unknown[]>,
   K extends keyof Events,
-> = (...args: Events[K]) => void;
+  R extends boolean | void = void
+> = (...args: Events[K]) => R;
 
 type DebugListener<
   Events extends Record<string, unknown[]>,
@@ -119,4 +147,3 @@ type DebugListener<
 type Pack<Events extends Record<string, unknown[]>> = {
   [K in keyof Events]: { event: K; data: Events[K]; }
 }[keyof Events];
-

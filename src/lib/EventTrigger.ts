@@ -1,4 +1,4 @@
-type Listener<A extends readonly unknown[] = []> = (...arg: A) => void;
+type Listener<A extends readonly unknown[] = [], R extends boolean | void = void> = (...arg: A) => R;
 
 /**
  * 1種類のイベントへのイベントハンドラーを管理する
@@ -12,7 +12,14 @@ export interface IEventTrigger<Args extends readonly unknown[]> {
   on(listener: Listener<Args>): this;
 
   /**
-   * 関数を削除します
+   * `true` を返すと自身を取り除くイベントリスナーを登録する
+   * @param event イベント名
+   * @param listener イベントリスナー
+   */
+  onoff(listener: Listener<Args, boolean | void>): this;
+
+  /**
+   * イベントリスナーを削除します
    * @param listener イベントリスナー
    */
   off(listener: Listener<Args>): this;
@@ -32,31 +39,44 @@ export interface IEventTrigger<Args extends readonly unknown[]> {
 }
 
 export class EventTrigger<Args extends readonly unknown[]> implements IEventTrigger<Args> {
-  private readonly callbacksSet = new Set<Listener<Args>>();
+  private readonly callbacksSet = new Set<Listener<Args, boolean | void>>();
 
-  on(listener: Listener<Args>) {
+  public on(listener: Listener<Args>) {
     this.callbacksSet.add(listener);
     return this;
   }
 
-  off(listener: Listener<Args>) {
+  public onoff(listener: Listener<Args, boolean | void>) {
+    return this.on(listener as unknown as Listener<Args>);
+  }
+
+  public off(listener: Listener<Args>) {
     this.callbacksSet.delete(listener);
     return this;
   }
 
-  once(listener: Listener<Args>) {
-    const onceListener: typeof listener = (...args) => {
-      this.off(onceListener);
+  public once(listener: Listener<Args>) {
+    const onceListener: Listener<Args, true> = (...args) => {
       listener(...args);
+      return true;
     };
 
-    return this.on(onceListener);
+    return this.onoff(onceListener);
   }
 
-  emit(...args: Args) {
+  public emit(...args: Args) {
+    const offCallbacks: any[] = [];
+
     for (const callback of this.callbacksSet) {
-      callback(...args);
+      if (callback(...args) === true) {
+        offCallbacks.push(callback);
+      }
     }
+
+    for (const callback of offCallbacks) {
+      this.callbacksSet.delete(callback);
+    }
+
     return true;
   }
 }
