@@ -1,8 +1,6 @@
 import type * as dwango from "../gen/dwango_pb";
 import type { IEventEmitter } from "../lib/EventEmitter";
 import type { IEventTrigger } from "../lib/EventTrigger";
-import type { NicoliveMessageClient } from "./NicoliveMessageClient";
-import type { NicoliveWsClient } from "./NicoliveWsClient";
 import type { NicoliveWsReceiveMessage } from "./NicoliveWsClientType";
 
 type SafeProperty<T, K extends keyof any> = K extends keyof T ? T[K] : void;
@@ -19,9 +17,6 @@ export type NicoliveClientState = "connecting" | "opened" | "reconnecting" | "re
  * ニコ生に接続するクライアント
  */
 export interface INicoliveClient {
-  readonly wsClient: NicoliveWsClient;
-  readonly messageClient?: NicoliveMessageClient;
-
   /**
    * 接続状態
    */
@@ -42,7 +37,7 @@ export interface INicoliveClient {
   /** メッセージサーバーとの接続の状態を通知する */
   readonly onMessageState: IEventTrigger<["opened" | "disconnected"]>;
   /** 受信した {@link dwango.ChunkedEntry} の種類を通知する */
-  readonly onMessageEntry: IEventTrigger<[dwango.ChunkedEntry["entry"]["case"] & {}]>;
+  readonly onMessageEntry: IEventTrigger<[dwango.ChunkedEntry["entry"]["case"]]>;
   /** {@link dwango.nicolive_chat_service_edge_payload_ChunkedMessage} を通知する */
   readonly onMessage: IEventTrigger<[dwango.ChunkedMessage]>;
   /** 過去コメントの: {@link dwango.nicolive_chat_service_edge_payload_ChunkedMessage} を通知する */
@@ -66,6 +61,10 @@ export interface INicoliveClient {
    * 放送終了時刻
    */
   readonly endTime: Date;
+  /**
+   * 過去コメントを取得中か
+   */
+  readonly isFetchingBackwardMessage: boolean;
 
 
   /**
@@ -80,9 +79,20 @@ export interface INicoliveClient {
   fetchBackwardMessages(minBackwards: number): Promise<void>;
 
   /**
+   * 過去メッセージを取得中だった場合に中断してその時点までで取得したメッセージを通知します
+   */
+  stopFetchBackwardMessages(): void;
+
+  /**
    * 接続を終了します
    */
   close(): void;
+
+  /**
+   * 破棄します\
+   * 過去コメントの取得ができなくなり、全てのメッセージを送信しなくなります
+   */
+  dispose(): void;
 }
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions

@@ -8,6 +8,7 @@ import type { INicoliveClient, NicoliveClientLog, NicoliveClientState, NicoliveW
 import { type NicoliveId, NicoliveWatchError, getNicoliveId } from "./utils";
 
 export class NicoliveClient implements INicoliveClient {
+  private _disposed = false;
   /**
    * ネットワークエラーが発生した時に再接続するインターバル\
    * 再接続されるまでトライする`n`回目の待機時間`n:value`
@@ -22,6 +23,10 @@ export class NicoliveClient implements INicoliveClient {
    */
   private _lastFetchMessage: dwango.ChunkedMessage | undefined;
 
+  /** 過去メッセージの取得を中断するか */
+  private _stopFetchBackwardMessages = false;
+
+
   public onState = new EventTrigger<[NicoliveClientState]>();
   public wsClient: NicoliveWsClient;
   public messageClient?: NicoliveMessageClient;
@@ -31,7 +36,7 @@ export class NicoliveClient implements INicoliveClient {
 
   public readonly onWsMessage = new EventEmitter<NicoliveWsReceiveMessageType>();
   public readonly onMessageState = new EventTrigger<["opened" | "disconnected"]>();
-  public readonly onMessageEntry = new EventTrigger<[dwango.ChunkedEntry["entry"]["case"] & {}]>();
+  public readonly onMessageEntry = new EventTrigger<[dwango.ChunkedEntry["entry"]["case"]]>();
   public readonly onMessage = new EventTrigger<[dwango.ChunkedMessage]>();
   public readonly onMessageOld = new EventTrigger<[dwango.ChunkedMessage[]]>();
 
@@ -44,6 +49,10 @@ export class NicoliveClient implements INicoliveClient {
   public websocketUrl: string;
   public beginTime: Date;
   public endTime: Date;
+
+  public get isFetchingBackwardMessage() {
+    return this.messageClient?.isFetchingBackwardMessage ?? false;
+  }
 
   public canFetchBackwardMessage(): boolean {
     return this.messageClient?.backwardUri != null;
@@ -74,6 +83,7 @@ export class NicoliveClient implements INicoliveClient {
     this.websocketUrl = pageData.websocketUrl;
     this.beginTime = new Date(pageData.beginTime * 1e3);
     this.endTime = new Date(pageData.endTime * 1e3);
+    this._stopFetchBackwardMessages = false;
 
     this.wsClient = new NicoliveWsClient(this, this.websocketUrl);
 
@@ -183,8 +193,23 @@ export class NicoliveClient implements INicoliveClient {
 
   public async fetchBackwardMessages(minBackwards: number) {
     if (this.messageClient == null) return;
+    const currentClient = this.messageClient;
 
-    await this.messageClient.fetchBackwardMessages(minBackwards);
+    await this.messageClient.fetchBackwardMessages(
+      minBackwards,
+      () => {
+        if (currentClient !== this.messageClient)
+          return "abort";
+        return this._stopFetchBackwardMessages ? "stop" : "continue";
+      },
+    );
+
+    this._stopFetchBackwardMessages = false;
+  }
+
+  public stopFetchBackwardMessages() {
+    if (!this.messageClient?.isFetchingBackwardMessage) return;
+    this._stopFetchBackwardMessages = true;
   }
 
   public close() {
@@ -197,6 +222,13 @@ export class NicoliveClient implements INicoliveClient {
 
     this.wsClient.close();
     this.messageClient?.close();
+  }
+
+  public dispose() {
+    if (this._disposed) return;
+    this._disposed = true;
+    this.close();
+    this.messageClient = undefined;
   }
 
   /**

@@ -31,7 +31,7 @@ export class NicoliveWsClient {
    * @param message 送信するメッセージ
    */
   public send(message: NicoliveWsSendMessage) {
-    this._ws!.send(JSON.stringify(message));
+    this._ws.send(JSON.stringify(message));
   }
 
   /**
@@ -101,4 +101,3 @@ export class NicoliveWsClient {
     }
   }
 }
-
