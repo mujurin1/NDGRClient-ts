@@ -4,8 +4,10 @@ import { EventTrigger } from "../lib/EventTrigger";
 import { promiser, sleep } from "../lib/utils";
 import { NicoliveMessageClient } from "./NicoliveMessageClient";
 import { NicoliveWsClient } from "./NicoliveWsClient";
-import type { INicoliveClient, NicoliveClientLog, NicoliveClientState, NicoliveWsReceiveMessageType } from "./type";
+import type { NicoliveCommentColor_Fixed, NicoliveWsSendPostComment } from "./NicoliveWsClientType";
+import type { INicoliveClient, NicoliveClientLog, NicoliveClientState, NicoliveInfo, NicoliveWsReceiveMessageType } from "./type";
 import { type NicoliveId, NicoliveWatchError, getNicoliveId } from "./utils";
+
 
 export class NicoliveClient implements INicoliveClient {
   private _disposed = false;
@@ -40,15 +42,11 @@ export class NicoliveClient implements INicoliveClient {
   public readonly onMessage = new EventTrigger<[dwango.ChunkedMessage]>();
   public readonly onMessageOld = new EventTrigger<[dwango.ChunkedMessage[]]>();
 
-  public readonly liveId: NicoliveId;
-  public readonly title: string;
-  public readonly userId?: string;
-  public readonly ownerId?: number;
-  public readonly ownerName: string;
-
   public websocketUrl: string;
   public beginTime: Date;
   public endTime: Date;
+  public vposBaseTimeMs: number = null!;
+  public readonly info: NicoliveInfo;
 
   public get isFetchingBackwardMessage() {
     return this.messageClient?.isFetchingBackwardMessage ?? false;
@@ -71,15 +69,11 @@ export class NicoliveClient implements INicoliveClient {
     minBackwards: number,
     isSnapshot: boolean,
   ) {
+    this.info = pageData.nicoliveInfo;
     if (!pageData.websocketUrl) {
-      throw new NicoliveWatchError(pageData.liveId);
+      throw new NicoliveWatchError(this.info.liveId);
     }
 
-    this.liveId = pageData.liveId;
-    this.title = pageData.title;
-    this.userId = pageData.userId;
-    this.ownerId = pageData.ownerId;
-    this.ownerName = pageData.ownerName;
     this.websocketUrl = pageData.websocketUrl;
     this.beginTime = new Date(pageData.beginTime * 1e3);
     this.endTime = new Date(pageData.endTime * 1e3);
@@ -100,6 +94,7 @@ export class NicoliveClient implements INicoliveClient {
       })
       .on("messageServer", data => {
         let skipTo: string | undefined;
+        this.vposBaseTimeMs = new Date(data.vposBaseTime).getTime();
 
         // `this._reconnecting === true`なら必ず`this.messageClient != null`
         if (!this._reconnecting || this.messageClient == null) {
@@ -191,6 +186,69 @@ export class NicoliveClient implements INicoliveClient {
     return new NicoliveClient(pageData, fromSec, minBackwards, isSnapshot);
   }
 
+  /**
+   * 視聴者コメントとして投稿する
+   * @param text コメント本文
+   * @param isAnonymous 匿名にするか. 未指定時は`false`
+   * @param options コマンドオプション
+   */
+  public postComment(text: string, isAnonymous: boolean = false, options?: Omit<NicoliveWsSendPostComment["data"], "text" | "vpos" | "isAnonymous">) {
+    if (this.info.loginUser == null) {
+      throw new Error("ログインしていないためコメントの投稿は出来ません");
+    }
+
+    this.wsClient.send({
+      type: "postComment",
+      data: {
+        ...options,
+        text,
+        isAnonymous,
+        vpos: Math.round((Date.now() - this.vposBaseTimeMs) / 10),
+      }
+    });
+  }
+
+  /**
+   * 放送者コメントとして投稿する
+   * @param text コメント本文
+   * @param name コメント者名
+   * @param isPermanent コメントを永続化 (固定) するか
+   * @param command カラー
+   */
+  public async postBroadcasterComment(text: string, name?: string, isPermanent = false, command?: NicoliveCommentColor_Fixed) {
+    if (this.info.owner.id == null || this.info.owner.id !== this.info.loginUser?.id) {
+      throw new Error("放送者でないため放送者コメントの投稿は出来ません");
+    }
+
+    await fetch(`https://live2.nicovideo.jp/unama/api/v3/programs/${this.info.liveId}/broadcaster_comment`, {
+      "headers": {
+        "accept": "application/json",
+        "content-type": "application/x-www-form-urlencoded",
+        "x-public-api-token": this.info.postBroadcasterCommentToken!
+      },
+      "body": `text=${encodeURIComponent(text)}&name=${name == null ? "" : encodeURIComponent(name)}&isPermanent=${isPermanent}&command=${command}`,
+      "method": "PUT",
+      "credentials": "include"
+    });
+  }
+
+  /**
+   * 放送者の固定コメントを削除する
+   */
+  public async deletePermanentComment() {
+    if (this.info.owner.id == null || this.info.owner.id !== this.info.loginUser?.id) {
+      throw new Error("放送者でないため放送者コメントの削除は出来ません");
+    }
+
+    await fetch(`https://live2.nicovideo.jp/unama/api/v3/programs/${this.info.liveId}/broadcaster_comment`, {
+      "headers": {
+        "x-public-api-token": this.info.postBroadcasterCommentToken!
+      },
+      "method": "DELETE",
+      "credentials": "include"
+    });
+  }
+
   public async fetchBackwardMessages(minBackwards: number) {
     if (this.messageClient == null) return;
     const currentClient = this.messageClient;
@@ -263,18 +321,15 @@ export class NicoliveClient implements INicoliveClient {
  * ニコ生視聴ページから取得するデータ
  */
 export interface NicolivePageData {
-  liveId: NicoliveId;
-  title: string;
-  ownerId: number | undefined;
-  ownerName: string;
   websocketUrl: string | undefined;
   /** 開始時刻 UNIX TIME (秒単位) */
   beginTime: number;
   /** 終了時刻 UNIX TIME (秒単位) */
   endTime: number;
-  userId: string | undefined;
   /** RELEASED: 予約中枠, BEFORE_RELEASE: 配信準備中 */
   status: "RELEASED" | "BEFORE_RELEASE" | "ON_AIR" | "ENDED";
+
+  nicoliveInfo: NicoliveInfo;
 }
 
 async function fetchLivePageData(id: NicoliveId): Promise<NicolivePageData> {
@@ -297,15 +352,31 @@ async function fetchLivePageData(id: NicoliveId): Promise<NicolivePageData> {
     if (ownerIdString != null) ownerId = +ownerIdString;
 
     data = {
-      liveId: id,
-      title: embeddedData.program.title,
-      ownerId,
-      ownerName: embeddedData.program.supplier.name,
-      websocketUrl: throwIsNull(embeddedData.site.relive.webSocketUrl),
-      beginTime: throwIsNull(embeddedData.program.beginTime),
-      endTime: throwIsNull(embeddedData.program.endTime),
-      userId: (embeddedData.user.id ?? undefined) as string | undefined,
+      websocketUrl: throwIsNull(embeddedData.site.relive.webSocketUrl, "embeddedData.site.relive.webSocketUrl が存在しません"),
+      beginTime: throwIsNull(embeddedData.program.beginTime, "embeddedData.program.beginTime が存在しません"),
+      endTime: throwIsNull(embeddedData.program.endTime, "embeddedData.program.endTime が存在しません"),
       status: embeddedData.program.status,
+
+      nicoliveInfo: {
+        liveId: embeddedData.program.nicoliveProgramId,
+        title: embeddedData.program.title,
+        owner: {
+          id: ownerId,
+          name: embeddedData.program.supplier.name,
+        },
+        loginUser: embeddedData.user?.isLoggedIn !== true
+          ? undefined
+          : {
+            id: +embeddedData.user.id,
+            name: embeddedData.user.nickname,
+            isPremium: embeddedData.user.accountType === "premium",
+            isBroadcaster: embeddedData.user.isBroadcaster,
+            /** isBroadcaster:true の場合は false */
+            isOperator: embeddedData.user.isOperator,
+            isSupportable: embeddedData.creatorCreatorSupportSummary?.isSupportable === true,
+          },
+        postBroadcasterCommentToken: embeddedData.site.relive.csrfToken,
+      }
     };
   } catch {
     throw new NicoliveWatchError(id);

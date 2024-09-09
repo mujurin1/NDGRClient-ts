@@ -2,6 +2,7 @@ import type * as dwango from "../gen/dwango_pb";
 import type { IEventEmitter } from "../lib/EventEmitter";
 import type { IEventTrigger } from "../lib/EventTrigger";
 import type { NicoliveWsReceiveMessage } from "./NicoliveWsClientType";
+import type { NicoliveId } from "./utils";
 
 type SafeProperty<T, K extends keyof any> = K extends keyof T ? T[K] : void;
 
@@ -13,6 +14,31 @@ export type NicoliveWsReceiveMessageType = {
 
 export type NicoliveClientState = "connecting" | "opened" | "reconnecting" | "reconnect_failed" | "disconnected";
 
+export interface NicoliveInfo {
+  readonly liveId: NicoliveId;
+  readonly title: string;
+
+  /** 配信者の情報 */
+  readonly owner: {
+    readonly id: number | undefined;
+    readonly name: string;
+  };
+
+  readonly loginUser: undefined | {
+    readonly id: number;
+    readonly name: string;
+    readonly isPremium: boolean;
+    readonly isBroadcaster: boolean;
+    /** isBroadcaster:true の場合でも true ではない */
+    readonly isOperator: boolean;
+    /** 配信者のクリエイターサポーターになっているか */
+    readonly isSupportable: boolean;
+  };
+
+  /** 放送者コメントを送るためのトークン */
+  readonly postBroadcasterCommentToken: string | undefined;
+
+}
 /**
  * ニコ生に接続するクライアント
  */
@@ -44,26 +70,20 @@ export interface INicoliveClient {
   readonly onMessageOld: IEventTrigger<[dwango.ChunkedMessage[]]>;
   //#endregion NicoliveMessageClient 用
 
-  /**
-   * 接続するWebSocketURL
-   */
+  /** 接続するWebSocketURL */
   readonly websocketUrl: string;
-  /**
-   * 放送に接続しているユーザーID
-   */
+  /** 放送に接続しているユーザーID */
   readonly userId?: string;
 
-  /**
-   * 放送開始時刻
-   */
+  /** 放送開始時刻 */
   readonly beginTime: Date;
-  /**
-   * 放送終了時刻
-   */
+  /** 放送終了時刻 */
   readonly endTime: Date;
-  /**
-   * 過去コメントを取得中か
-   */
+  /** 枠を建てた時刻 UNIX TIME (秒単位) */
+  readonly vposBaseTimeMs: number;
+  /** 放送やユーザーの情報 */
+  readonly info: NicoliveInfo;
+  /** 過去コメントを取得中か */
   readonly isFetchingBackwardMessage: boolean;
 
 

@@ -92,13 +92,15 @@ export interface NicoliveWsSendPostComment {
      * 通常75文字まで. `isAnonymous:false`のときは1024文字まで
      */
     text: string;
-    /** コメントの投稿位置 (0.01 秒単位)  */
+    /**
+     * 枠が建ってからのコメントの投稿位置 (0.01 秒単位)\
+     * 放送開始ではなく、枠が建ってからの時刻
+     */
     vpos: number;
     /**
-     * `true`: 184で投稿/名札をはずす\
-     * `false`: 生IDで投稿/名札をつける
+     * 184で投稿する(`true`)か. 未指定時は`true`
      */
-    isAnonymous: false;
+    isAnonymous?: boolean;
     /**
      * コメント色. 未指定時は`"white"`
      */
