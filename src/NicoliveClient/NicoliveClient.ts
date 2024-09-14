@@ -236,7 +236,7 @@ export class NicoliveClient implements INicoliveClient {
    * 放送者の固定コメントを削除する
    */
   public async deletePermanentComment() {
-    if (this.info.owner.id == null || this.info.owner.id !== this.info.loginUser?.id) {
+    if (this.info.loginUser?.isBroadcaster !== true) {
       throw new Error("放送者でないため放送者コメントの削除は出来ません");
     }
 
@@ -348,8 +348,8 @@ async function fetchLivePageData(id: NicoliveId): Promise<NicolivePageData> {
     const embeddedData = JSON.parse(embeddedString);
 
     const ownerIdString = embeddedData.program.supplier.programProviderId;
-    let ownerId: number | undefined;
-    if (ownerIdString != null) ownerId = +ownerIdString;
+    let ownerId: string | undefined;
+    if (ownerIdString != null) ownerId = ownerIdString + "";
 
     data = {
       websocketUrl: throwIsNull(embeddedData.site.relive.webSocketUrl, "embeddedData.site.relive.webSocketUrl が存在しません"),
@@ -367,7 +367,7 @@ async function fetchLivePageData(id: NicoliveId): Promise<NicolivePageData> {
         loginUser: embeddedData.user?.isLoggedIn !== true
           ? undefined
           : {
-            id: +embeddedData.user.id,
+            id: embeddedData.user.id + "",
             name: embeddedData.user.nickname,
             isPremium: embeddedData.user.accountType === "premium",
             isBroadcaster: embeddedData.user.isBroadcaster,

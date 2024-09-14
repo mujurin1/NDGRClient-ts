@@ -20,12 +20,12 @@ export interface NicoliveInfo {
 
   /** 配信者の情報 */
   readonly owner: {
-    readonly id: number | undefined;
+    readonly id: string | undefined;
     readonly name: string;
   };
 
   readonly loginUser: undefined | {
-    readonly id: number;
+    readonly id: string;
     readonly name: string;
     readonly isPremium: boolean;
     readonly isBroadcaster: boolean;
