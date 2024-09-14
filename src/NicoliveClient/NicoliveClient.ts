@@ -107,12 +107,7 @@ export class NicoliveClient implements INicoliveClient {
 
         this.messageClient.connect(fromSec, minBackwards, skipTo)
           .catch(async (e: unknown) => {
-            if (!(e instanceof Error)) {
-              this.onLog.emit("error", { type: "unknown_error", error: e });
-              throw e;
-            }
-
-            if (e.message === "Failed to fetch") {
+            if (e instanceof Error && e.message === "Failed to fetch") {
               // ネットワーク障害時に再接続する
               this._reconnecting = true;
               reconnectTime = this.messageClient!.currentNext;
@@ -135,14 +130,17 @@ export class NicoliveClient implements INicoliveClient {
               this._reconnecting = false;
               this.onLog.emit("error", { type: "reconnect_failed" });
               this.close();
-            } else throw e;
+            } else {
+              this.onLog.emit("error", { type: "unknown_error", error: e });
+              throw e;
+            }
           });
       })
       .on("reconnect", ({ audienceToken, waitTimeSec }) => {
         // MEMO: この関数は全くテストをしていません
         this.onLog.emit(
           "info",
-          { type: "any", message: `ウェブソケットの再接続要求を受け取りました\n${waitTimeSec * 1e3}秒後にウェブソケットを切断して再接続します` }
+          { type: "any_info", message: `ウェブソケットの再接続要求を受け取りました\n${waitTimeSec}秒後にウェブソケットを切断して再接続します` }
         );
         this.websocketUrl = replaceToken(this.websocketUrl, audienceToken);
 

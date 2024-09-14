@@ -126,7 +126,7 @@ export type NicoliveClientLog = {
 
 export type NicoliveClientInfo = NicoliveClientAnyInfo | NicoliveClientReconnectInfo;
 export interface NicoliveClientAnyInfo {
-  type: "any";
+  type: "any_info";
   message: string;
 }
 export interface NicoliveClientReconnectInfo {
