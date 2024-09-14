@@ -39,6 +39,9 @@ export interface NicoliveInfo {
   readonly postBroadcasterCommentToken: string | undefined;
 
 }
+
+export type DisconnectType = "end_live" | "catch_error" | "from_self";
+
 /**
  * ニコ生に接続するクライアント
  */
@@ -61,7 +64,7 @@ export interface INicoliveClient {
 
   //#region NicoliveMessageClient 用
   /** メッセージサーバーとの接続の状態を通知する */
-  readonly onMessageState: IEventTrigger<["opened" | "disconnected"]>;
+  readonly onMessageState: IEventTrigger<["opened" | "disconnected", DisconnectType | undefined]>;
   /** 受信した {@link dwango.ChunkedEntry} の種類を通知する */
   readonly onMessageEntry: IEventTrigger<[dwango.ChunkedEntry["entry"]["case"]]>;
   /** {@link dwango.nicolive_chat_service_edge_payload_ChunkedMessage} を通知する */

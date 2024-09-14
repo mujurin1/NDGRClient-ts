@@ -5,9 +5,8 @@ import { promiser, sleep } from "../lib/utils";
 import { NicoliveMessageClient } from "./NicoliveMessageClient";
 import { NicoliveWsClient } from "./NicoliveWsClient";
 import type { NicoliveCommentColor_Fixed, NicoliveWsSendPostComment } from "./NicoliveWsClientType";
-import type { INicoliveClient, NicoliveClientLog, NicoliveClientState, NicoliveInfo, NicoliveWsReceiveMessageType } from "./type";
+import type { DisconnectType, INicoliveClient, NicoliveClientLog, NicoliveClientState, NicoliveInfo, NicoliveWsReceiveMessageType } from "./type";
 import { type NicoliveId, NicoliveWatchError, getNicoliveId } from "./utils";
-
 
 export class NicoliveClient implements INicoliveClient {
   private _disposed = false;
@@ -37,7 +36,7 @@ export class NicoliveClient implements INicoliveClient {
   public readonly onLog = new EventEmitter<NicoliveClientLog>();
 
   public readonly onWsMessage = new EventEmitter<NicoliveWsReceiveMessageType>();
-  public readonly onMessageState = new EventTrigger<["opened" | "disconnected"]>();
+  public readonly onMessageState = new EventTrigger<["opened" | "disconnected", DisconnectType | undefined]>();
   public readonly onMessageEntry = new EventTrigger<[dwango.ChunkedEntry["entry"]["case"]]>();
   public readonly onMessage = new EventTrigger<[dwango.ChunkedMessage]>();
   public readonly onMessageOld = new EventTrigger<[dwango.ChunkedMessage[]]>();
@@ -133,6 +132,7 @@ export class NicoliveClient implements INicoliveClient {
                 }
               }
 
+              this._reconnecting = false;
               this.onLog.emit("error", { type: "reconnect_failed" });
               this.close();
             } else throw e;
@@ -153,6 +153,7 @@ export class NicoliveClient implements INicoliveClient {
           if (await this.reconnect()) {
             this.onLog.emit("info", { type: "reconnect" });
           } else {
+            this._reconnecting = false;
             this.onLog.emit("error", { type: "reconnect_failed" });
             this.close();
           }
@@ -274,7 +275,6 @@ export class NicoliveClient implements INicoliveClient {
     if (this._reconnecting) {
       this.onState.emit("reconnect_failed");
     } else {
-      this._reconnecting = false;
       this.onState.emit("disconnected");
     }
 
