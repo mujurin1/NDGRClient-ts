@@ -87,7 +87,7 @@ export async function* readableStreamToAsyncIterable<T>(reader: ReadableStreamDe
 
 export class NicoliveFetchError extends Error {
   constructor(public status: number, public uri: string) {
-    super(`Failed fetch. status:${status} ${uri}`);
+    super(`Failed to fetch. status:${status} ${uri}`);
 
     this.name = new.target.name;
     Object.setPrototypeOf(this, new.target.prototype);
@@ -115,4 +115,3 @@ export class NicoliveNetworkError extends Error {
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
-

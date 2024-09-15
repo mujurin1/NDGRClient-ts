@@ -68,9 +68,11 @@ export class NicoliveWsClient {
     this.subscriber.onWsMessage.emit(message.type, (<any>message).data);
 
     if (message.type === "seat") {
-      this.startKeepInterval(message.data.keepIntervalSec);
+      // setInterval はバックグラウンドで止まるので廃止. 代わりに pong と一緒に送る
+      // this.startKeepInterval(message.data.keepIntervalSec);
     } else if (message.type === "ping") {
       this.send({ type: "pong" });
+      this.send({ type: "keepSeat" });
     } else if (message.type === "disconnect") {
       this.close();
     }

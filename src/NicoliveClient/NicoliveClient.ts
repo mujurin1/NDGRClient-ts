@@ -52,6 +52,8 @@ export interface INicoliveClientSubscriber {
   //#endregion NicoliveMessageClient 用
 }
 
+export type DisconnectType = undefined | "user" | "ws_close" | "message_close" | "reconnect_failed" | "unknown";
+
 export class NicoliveClient implements INicoliveClientSubscriber {
   /**
    * ネットワークエラーが発生した時に再接続するインターバル\
@@ -71,7 +73,7 @@ export class NicoliveClient implements INicoliveClientSubscriber {
   private _stopFetchBackwardMessages = false;
 
 
-  public onState = new EventTrigger<[NicoliveClientState]>();
+  public onState = new EventTrigger<[NicoliveClientState, DisconnectType]>();
   public readonly onLog = new EventEmitter<NicoliveClientLog>();
 
   public wsClient: NicoliveWsClient;
@@ -130,18 +132,18 @@ export class NicoliveClient implements INicoliveClientSubscriber {
       .on("reconnect", this.onReconnect);
 
     this.onWsState.on(event => {
-      if (event === "disconnected") this.close();
+      if (event === "disconnected") this.close("ws_close");
     });
     this.onMessageState.on(event => {
-      if (event === "opened") this.onState.emit("opened");
-      else this.close();
+      if (event === "opened") this.onState.emit("opened", undefined);
+      else this.close("message_close");
     });
 
     this.onMessage.on(this.onMessage_updateLast);
     this.onMessageOld.on(messages => this.onMessage_updateLast(messages.at(-1)));
     //#endregion Subscribe
 
-    this.onState.emit("connecting");
+    this.onState.emit("connecting", undefined);
   }
   /**
    * ニコニコ生放送と通信するクライアントを生成します
@@ -251,12 +253,13 @@ export class NicoliveClient implements INicoliveClientSubscriber {
 
   /**
    * 接続を終了します
+   * @param description 終了理由
    */
-  public close(): void {
+  public close(description: DisconnectType = "user"): void {
     if (this._reconnecting) {
-      this.onState.emit("reconnect_failed");
+      this.onState.emit("reconnect_failed", description);
     } else {
-      this.onState.emit("disconnected");
+      this.onState.emit("disconnected", description);
     }
 
     this.wsClient.close();
@@ -280,7 +283,7 @@ export class NicoliveClient implements INicoliveClientSubscriber {
     if (!this.canReconnect()) return true;
 
     this._reconnecting = true;
-    this.onState.emit("reconnecting");
+    this.onState.emit("reconnecting", undefined);
 
     if (await this._reconnectWs()) {
       this.onLog.emit("info", { type: "reconnect" });
@@ -288,7 +291,7 @@ export class NicoliveClient implements INicoliveClientSubscriber {
     } else {
       this._reconnecting = false;
       this.onLog.emit("error", { type: "reconnect_failed" });
-      this.close();
+      this.close("reconnect_failed");
       return false;
     }
   }
@@ -380,7 +383,7 @@ export class NicoliveClient implements INicoliveClientSubscriber {
       // ネットワーク障害時に再接続する
       this._reconnecting = true;
 
-      this.onState.emit("reconnecting");
+      this.onState.emit("reconnecting", undefined);
       this.wsClient.close(true);
 
       for (const intervalSec of this._reconnectIntervalsSec) {
@@ -397,9 +400,10 @@ export class NicoliveClient implements INicoliveClientSubscriber {
 
       this._reconnecting = false;
       this.onLog.emit("error", { type: "reconnect_failed" });
-      this.close();
+      this.close("reconnect_failed");
     } else {
       this.onLog.emit("error", { type: "unknown_error", error: error });
+      this.close("unknown");
       throw error;
     }
   };
