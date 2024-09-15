@@ -63,7 +63,7 @@ export class NicoliveMessageClient {
     if (this._connecting) {
       if (this._closeReservation) {
         this._closeReservation = false;
-        this.receiver.onMessageState.emit("opened", undefined);
+        this.receiver.onMessageState.emit("opened");
       }
       return;
     }
@@ -79,7 +79,7 @@ export class NicoliveMessageClient {
       this._nextAt = BigInt(at);
     }
 
-    this.receiver.onMessageState.emit("opened", undefined);
+    this.receiver.onMessageState.emit("opened");
 
     try {
       while (this._nextAt != null && !this._closeReservation) {
@@ -94,13 +94,13 @@ export class NicoliveMessageClient {
 
       this._connecting = false;
       if (!this._closeReservation) {
-        this.receiver.onMessageState.emit("disconnected", "end_live");
+        this.receiver.onMessageState.emit("disconnected");
       }
       this._closeReservation = false;
     } catch (e) {
       this._connecting = false;
       if (!this._closeReservation) {
-        this.receiver.onMessageState.emit("disconnected", "catch_error");
+        this.receiver.onMessageState.emit("disconnected");
       }
       this._closeReservation = false;
 
@@ -115,7 +115,7 @@ export class NicoliveMessageClient {
   public close() {
     if (!this.isConnect()) return;
     this._closeReservation = true;
-    this.receiver.onMessageState.emit("disconnected", "from_self");
+    this.receiver.onMessageState.emit("disconnected");
   }
 
   private async receiveEntry({ entry: { case: case_, value } }: dwango.ChunkedEntry, minBackwards: number) {

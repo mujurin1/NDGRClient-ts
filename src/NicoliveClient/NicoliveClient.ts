@@ -5,7 +5,7 @@ import { promiser, sleep } from "../lib/utils";
 import { NicoliveMessageClient } from "./NicoliveMessageClient";
 import { NicoliveWsClient } from "./NicoliveWsClient";
 import type { NicoliveCommentColor_Fixed, NicoliveWsSendPostComment } from "./NicoliveWsClientType";
-import type { DisconnectType, INicoliveClient, NicoliveClientLog, NicoliveClientState, NicoliveInfo, NicoliveWsReceiveMessageType } from "./type";
+import type { INicoliveClient, NicoliveClientLog, NicoliveClientState, NicoliveInfo, NicoliveWsReceiveMessageType } from "./type";
 import { type NicoliveId, NicoliveWatchError, checkCloseMessage, getNicoliveId } from "./utils";
 
 export class NicoliveClient implements INicoliveClient {
@@ -36,7 +36,7 @@ export class NicoliveClient implements INicoliveClient {
   public readonly onWsMessage = new EventEmitter<NicoliveWsReceiveMessageType>();
 
   public messageClient?: NicoliveMessageClient;
-  public readonly onMessageState = new EventTrigger<["opened" | "disconnected", DisconnectType | undefined]>();
+  public readonly onMessageState = new EventTrigger<["opened" | "disconnected"]>();
   public readonly onMessageEntry = new EventTrigger<[dwango.ChunkedEntry["entry"]["case"]]>();
   public readonly onMessage = new EventTrigger<[dwango.ChunkedMessage]>();
   public readonly onMessageOld = new EventTrigger<[dwango.ChunkedMessage[]]>();
@@ -290,7 +290,7 @@ export class NicoliveClient implements INicoliveClient {
    */
   public async reconnect(): Promise<boolean> {
     if (this.wsClient.isConnect() && this.messageClient?.isConnect() === true) return true;
-    if (checkCloseMessage(this._lastFetchMessage)) return true;
+    if (!this.canReconnect()) return true;
 
     this._reconnecting = true;
     this.onState.emit("reconnecting");
@@ -304,6 +304,14 @@ export class NicoliveClient implements INicoliveClient {
       this.close();
       return false;
     }
+  }
+
+  /**
+   * 再接続可能(する必要がある)か調べる
+   * @returns 
+   */
+  public canReconnect() {
+    return !this._reconnecting && !checkCloseMessage(this._lastFetchMessage);
   }
 
   /**
