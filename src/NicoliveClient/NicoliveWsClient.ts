@@ -5,6 +5,11 @@ import type { INicoliveClient } from "./type";
 export class NicoliveWsClient {
   private readonly _ws: WebSocket;
 
+  public isConnect() {
+    return (this._ws.readyState === WebSocket.CONNECTING || this._ws.readyState === WebSocket.OPEN);
+  }
+
+
   /**
    * @param receiver メッセージを通知する相手
    * @param websocketUrl 接続するWebSocketURL
@@ -39,10 +44,7 @@ export class NicoliveWsClient {
    * @param reconnection 再接続するために終了する場合は`true`
    */
   public close(reconnection = false) {
-    if (
-      this._ws.readyState === WebSocket.CLOSING ||
-      this._ws.readyState === WebSocket.CLOSED
-    ) return;
+    if (!this.isConnect()) return;
 
     this.stopKeepInterval();
     this._ws.onclose = null;

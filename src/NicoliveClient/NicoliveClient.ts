@@ -19,23 +19,23 @@ export class NicoliveClient implements INicoliveClient {
   private _reconnecting = false;
 
   /**
-   * 最後に受信したメッセージ\
+   * 最後に受信したメッセージの情報\
    * 再接続時に使うため
    */
-  private _lastFetchMessage: dwango.ChunkedMessage | undefined;
+  private _lastFetchMessageMeta: dwango.ChunkedMessage_Meta | undefined;
 
   /** 過去メッセージの取得を中断するか */
   private _stopFetchBackwardMessages = false;
 
 
   public onState = new EventTrigger<[NicoliveClientState]>();
-  public wsClient: NicoliveWsClient;
-  public messageClient?: NicoliveMessageClient;
-
-  public readonly onWsState = new EventTrigger<["opened" | "reconnecting" | "disconnected"]>();
   public readonly onLog = new EventEmitter<NicoliveClientLog>();
 
+  public wsClient: NicoliveWsClient;
+  public readonly onWsState = new EventTrigger<["opened" | "reconnecting" | "disconnected"]>();
   public readonly onWsMessage = new EventEmitter<NicoliveWsReceiveMessageType>();
+
+  public messageClient?: NicoliveMessageClient;
   public readonly onMessageState = new EventTrigger<["opened" | "disconnected", DisconnectType | undefined]>();
   public readonly onMessageEntry = new EventTrigger<[dwango.ChunkedEntry["entry"]["case"]]>();
   public readonly onMessage = new EventTrigger<[dwango.ChunkedMessage]>();
@@ -80,9 +80,6 @@ export class NicoliveClient implements INicoliveClient {
 
     this.wsClient = new NicoliveWsClient(this, this.websocketUrl);
 
-    /** 再接続時に取得するメッセージの時刻. UNIX TIME (秒単位) */
-    let reconnectTime: bigint | "now" | undefined;
-
     this.onState.emit("connecting");
 
     this.onWsMessage
@@ -100,9 +97,9 @@ export class NicoliveClient implements INicoliveClient {
           this.messageClient = new NicoliveMessageClient(this, data.viewUri, isSnapshot);
         } else {
           // 再接続時には取得する開始の時刻, それ以前は不要 で取得開始する
-          if (typeof reconnectTime === "bigint") fromSec = Number(reconnectTime);
+          fromSec = Number(this._lastFetchMessageMeta!.at!.seconds);
           minBackwards = 1; // 0 だと最後のメッセージがチャンクの最後だった場合に恐らくメッセージを受信できない
-          skipTo = this._lastFetchMessage?.meta?.id;
+          skipTo = this._lastFetchMessageMeta!.id;
         }
 
         this.messageClient.connect(fromSec, minBackwards, skipTo)
@@ -110,7 +107,6 @@ export class NicoliveClient implements INicoliveClient {
             if (e instanceof Error && e.message === "Failed to fetch") {
               // ネットワーク障害時に再接続する
               this._reconnecting = true;
-              reconnectTime = this.messageClient!.currentNext;
 
               this.onState.emit("reconnecting");
               this.wsClient.close(true);
@@ -119,7 +115,7 @@ export class NicoliveClient implements INicoliveClient {
                 this.onLog.emit("info", { type: "reconnect", sec: intervalSec });
                 await sleep(intervalSec * 1e3);
 
-                const succsessed = await this.reconnect();
+                const succsessed = await this._reconnectWs();
 
                 if (succsessed) {
                   this.onLog.emit("info", { type: "reconnect" });
@@ -144,17 +140,8 @@ export class NicoliveClient implements INicoliveClient {
         );
         this.websocketUrl = replaceToken(this.websocketUrl, audienceToken);
 
-        setTimeout(async () => {
-          this._reconnecting = true;
-          this.onState.emit("reconnecting");
-
-          if (await this.reconnect()) {
-            this.onLog.emit("info", { type: "reconnect" });
-          } else {
-            this._reconnecting = false;
-            this.onLog.emit("error", { type: "reconnect_failed" });
-            this.close();
-          }
+        setTimeout(() => {
+          void this.reconnect();
         }, waitTimeSec * 1e3);
       });
 
@@ -166,8 +153,18 @@ export class NicoliveClient implements INicoliveClient {
       else this.close();
     });
 
-    this.onMessage.on(message => this._lastFetchMessage = message);
-    this.onMessageOld.on(messages => this._lastFetchMessage = messages.at(-1));
+    this.onMessage.on(message => {
+      if (message.meta?.at == null) return;
+
+      this._lastFetchMessageMeta = message.meta;
+    });
+    this.onMessageOld.on(messages => {
+      const message = messages.at(-1);
+      if (message?.meta?.at == null) return;
+      if (this._lastFetchMessageMeta == null || this._lastFetchMessageMeta.at!.seconds < message.meta.at.seconds) {
+        this._lastFetchMessageMeta = message.meta;
+      }
+    });
   }
 
   /**
@@ -291,7 +288,31 @@ export class NicoliveClient implements INicoliveClient {
    * ウェブソケットに再接続する
    * @returns 再接続に成功したか
    */
-  private async reconnect() {
+  public async reconnect(): Promise<boolean> {
+    if (this.wsClient.isConnect() && this.messageClient?.isConnect() === true) return true;
+
+    this._reconnecting = true;
+    this.onState.emit("reconnecting");
+
+    if (await this._reconnectWs()) {
+      this.onLog.emit("info", { type: "reconnect" });
+      return true;
+    } else {
+      this._reconnecting = false;
+      this.onLog.emit("error", { type: "reconnect_failed" });
+      this.close();
+      return false;
+    }
+  }
+
+  /**
+   * ウェブソケットに再接続する\
+   * フラグの変更やメッセージの送信は行わない
+   * @returns 再接続に成功したか
+   */
+  private async _reconnectWs() {
+    this.wsClient.close(true);
+
     this.wsClient = new NicoliveWsClient(
       this,
       this.websocketUrl,

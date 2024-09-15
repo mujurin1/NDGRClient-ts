@@ -23,6 +23,9 @@ export class NicoliveMessageClient {
   /** 過去メッセージを受信するためのURI */
   private _backwardUri: string | undefined = "--not-connect";
 
+  public isConnect() {
+    return (this._connecting && !this._closeReservation);
+  }
 
   /**
    * 過去メッセージを受信するためのURI\
@@ -57,7 +60,13 @@ export class NicoliveMessageClient {
    * @param skipTo 指定したIDのメッセージの次までスキップする (このIDの次のメッセージから通知される)
    */
   public async connect(fromSec: number | "now", minBackwards: number, skipTo?: string) {
-    if (this._connecting) throw new Error("すでに接続しています");
+    if (this._connecting) {
+      if (this._closeReservation) {
+        this._closeReservation = false;
+        this.receiver.onMessageState.emit("opened", undefined);
+      }
+      return;
+    }
 
     this._closeReservation = false;
     this._skipTo = skipTo;
@@ -104,7 +113,7 @@ export class NicoliveMessageClient {
    * 現在取得中のストリームを取り終えるまでは終了しない
    */
   public close() {
-    if (!this._connecting || this._closeReservation) return;
+    if (!this.isConnect()) return;
     this._closeReservation = true;
     this.receiver.onMessageState.emit("disconnected", "from_self");
   }
@@ -190,7 +199,7 @@ export class NicoliveMessageClient {
    * @param Continuation 中断するかチェックする関数\
    * `"continue"`継続\
    * `"stop"`メッセージの取得を終了する. 取得したメッセージは通知される\
-   * `"abort"`処理を中断して取得したメッセージを破棄する. 
+   * `"abort"`処理を中断して取得したメッセージを破棄する.
    */
   public async fetchBackwardMessages(minBackwards: number, continuation: () => "continue" | "stop" | "abort") {
     if (this._fetchingBackwardMessage) return;
