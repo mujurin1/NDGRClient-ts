@@ -1,12 +1,56 @@
 import type * as dwango from "../gen/dwango_pb";
-import { EventEmitter } from "../lib/EventEmitter";
-import { EventTrigger } from "../lib/EventTrigger";
+import { EventEmitter, type IEventEmitter } from "../lib/EventEmitter";
+import { EventTrigger, type IEventTrigger } from "../lib/EventTrigger";
 import { promiser, sleep } from "../lib/utils";
 import { NicoliveMessageClient } from "./NicoliveMessageClient";
 import { NicoliveWsClient } from "./NicoliveWsClient";
 import type { NicoliveCommentColor_Fixed, NicoliveWsSendPostComment } from "./NicoliveWsClientType";
-import type { INicoliveClient, NicoliveClientLog, NicoliveClientState, NicoliveInfo, NicoliveWsReceiveMessageType } from "./type";
+import type { NicoliveClientLog, NicoliveInfo, NicoliveWsReceiveMessageType } from "./type";
 import { type NicoliveId, NicoliveWatchError, checkCloseMessage, getNicoliveId } from "./utils";
+
+
+export type NicoliveClientState = "connecting" | "opened" | "reconnecting" | "reconnect_failed" | "disconnected";
+
+/**
+ * ニコ生に接続するクライアント
+ */
+export interface INicoliveClient {
+  //#region NicoliveWsClient 用
+  /**
+   * ウェブソケットの状態を通知する
+   */
+  readonly onWsState: IEventTrigger<["opened" | "reconnecting" | "disconnected"]>;
+
+  /**
+   * {@link NicoliveWsReceiveMessage} を通知する
+   */
+  readonly onWsMessage: IEventEmitter<NicoliveWsReceiveMessageType>;
+  //#endregion NicoliveWsClient 用
+
+
+
+  //#region NicoliveMessageClient 用
+  /**
+   * メッセージサーバーとの接続の状態を通知する
+   */
+  readonly onMessageState: IEventTrigger<["opened" | "disconnected"]>;
+
+  /**
+   * 受信した {@link dwango.ChunkedEntry} の種類を通知する 
+   */
+  readonly onMessageEntry: IEventTrigger<[dwango.ChunkedEntry["entry"]["case"]]>;
+
+  /**
+   * {@link dwango.nicolive_chat_service_edge_payload_ChunkedMessage} を通知する
+   */
+  readonly onMessage: IEventTrigger<[dwango.ChunkedMessage]>;
+
+  /**
+   * 過去コメントの: {@link dwango.nicolive_chat_service_edge_payload_ChunkedMessage} を通知する
+   */
+  readonly onMessageOld: IEventTrigger<[dwango.ChunkedMessage[]]>;
+  //#endregion NicoliveMessageClient 用
+}
 
 export class NicoliveClient implements INicoliveClient {
   private _disposed = false;

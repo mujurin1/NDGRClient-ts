@@ -1,6 +1,6 @@
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
+import type { INicoliveClient } from "./NicoliveClient";
 import type { NicoliveStream, NicoliveWsReceiveMessage, NicoliveWsSendMessage, NicoliveWsSendStartWatching } from "./NicoliveWsClientType";
-import type { INicoliveClient } from "./type";
 
 export class NicoliveWsClient {
   private readonly _ws: WebSocket;

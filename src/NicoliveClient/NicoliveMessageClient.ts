@@ -1,7 +1,7 @@
 import * as protobuf from "@bufbuild/protobuf";
 import * as dwango from "../gen/dwango_pb";
 import { sleep } from "../lib/utils";
-import type { INicoliveClient } from "./type";
+import type { INicoliveClient } from "./NicoliveClient";
 import { checkCloseMessage, readProtobufStream } from "./utils";
 
 /**
