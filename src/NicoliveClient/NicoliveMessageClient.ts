@@ -1,7 +1,7 @@
 import * as protobuf from "@bufbuild/protobuf";
 import * as dwango from "../gen/dwango_pb";
 import { sleep } from "../lib/utils";
-import type { INicoliveClient } from "./NicoliveClient";
+import type { INicoliveClientSubscriber } from "./NicoliveClient";
 import { checkCloseMessage, readProtobufStream } from "./utils";
 
 /**
@@ -43,12 +43,12 @@ export class NicoliveMessageClient {
   public currentNext: bigint | "now" | undefined;
 
   /**
-   * @param receiver メッセージを通知する相手
+   * @param subscriber メッセージを通知する相手
    * @param uri 接続するURI. `messageServer.data.viewUri`
    * @param isSnapshot 過去メッセージからは状態付きメッセージのみを受信するか
    */
   public constructor(
-    private readonly receiver: INicoliveClient,
+    private readonly subscriber: INicoliveClientSubscriber,
     private readonly uri: string,
     private readonly isSnapshot: boolean,
   ) { }
@@ -63,7 +63,7 @@ export class NicoliveMessageClient {
     if (this._connecting) {
       if (this._closeReservation) {
         this._closeReservation = false;
-        this.receiver.onMessageState.emit("opened");
+        this.subscriber.onMessageState.emit("opened");
       }
       return;
     }
@@ -79,7 +79,7 @@ export class NicoliveMessageClient {
       this._nextAt = BigInt(at);
     }
 
-    this.receiver.onMessageState.emit("opened");
+    this.subscriber.onMessageState.emit("opened");
 
     try {
       while (this._nextAt != null && !this._closeReservation) {
@@ -94,13 +94,13 @@ export class NicoliveMessageClient {
 
       this._connecting = false;
       if (!this._closeReservation) {
-        this.receiver.onMessageState.emit("disconnected");
+        this.subscriber.onMessageState.emit("disconnected");
       }
       this._closeReservation = false;
     } catch (e) {
       this._connecting = false;
       if (!this._closeReservation) {
-        this.receiver.onMessageState.emit("disconnected");
+        this.subscriber.onMessageState.emit("disconnected");
       }
       this._closeReservation = false;
 
@@ -115,11 +115,11 @@ export class NicoliveMessageClient {
   public close() {
     if (!this.isConnect()) return;
     this._closeReservation = true;
-    this.receiver.onMessageState.emit("disconnected");
+    this.subscriber.onMessageState.emit("disconnected");
   }
 
   private async receiveEntry({ entry: { case: case_, value } }: dwango.ChunkedEntry, minBackwards: number) {
-    this.receiver.onMessageEntry.emit(case_);
+    this.subscriber.onMessageEntry.emit(case_);
 
     // entry の配信順序: backward > previous* > segment+ > next?
     if (case_ === "next") {
@@ -161,7 +161,7 @@ export class NicoliveMessageClient {
 
     if (checkCloseMessage(message)) this.close();
 
-    this.receiver.onMessage.emit(message);
+    this.subscriber.onMessage.emit(message);
   }
 
   private receiveMessageOld(messages: dwango.ChunkedMessage[]) {
@@ -175,7 +175,7 @@ export class NicoliveMessageClient {
     const last = messages.at(-1);
     if (checkCloseMessage(last)) this.close();
 
-    this.receiver.onMessageOld.emit(messages);
+    this.subscriber.onMessageOld.emit(messages);
   }
 
   private async fetchMessages(uri: string) {

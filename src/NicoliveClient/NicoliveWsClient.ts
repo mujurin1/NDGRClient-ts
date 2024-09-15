@@ -1,5 +1,5 @@
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-import type { INicoliveClient } from "./NicoliveClient";
+import type { INicoliveClientSubscriber } from "./NicoliveClient";
 import type { NicoliveStream, NicoliveWsReceiveMessage, NicoliveWsSendMessage, NicoliveWsSendStartWatching } from "./NicoliveWsClientType";
 
 export class NicoliveWsClient {
@@ -11,7 +11,7 @@ export class NicoliveWsClient {
 
 
   /**
-   * @param receiver メッセージを通知する相手
+   * @param subscriber メッセージを通知する相手
    * @param websocketUrl 接続するWebSocketURL
    * @param nicoliveStream 映像を受信する場合に指定する
    * @param reconnect 再接続の場合は`true`\
@@ -19,7 +19,7 @@ export class NicoliveWsClient {
    * @default false
    */
   constructor(
-    private readonly receiver: INicoliveClient,
+    private readonly subscriber: INicoliveClientSubscriber,
     readonly websocketUrl: string,
     private readonly nicoliveStream?: NicoliveStream,
     private readonly reconnect = false,
@@ -50,12 +50,12 @@ export class NicoliveWsClient {
     this._ws.onclose = null;
     this._ws.close();
 
-    if (reconnection) this.receiver.onWsState.emit("reconnecting");
-    else this.receiver.onWsState.emit("disconnected");
+    if (reconnection) this.subscriber.onWsState.emit("reconnecting");
+    else this.subscriber.onWsState.emit("disconnected");
   }
 
   private readonly onOpen = () => {
-    this.receiver.onWsState.emit("opened");
+    this.subscriber.onWsState.emit("opened");
 
     this.send({
       type: "startWatching",
@@ -65,7 +65,7 @@ export class NicoliveWsClient {
 
   private readonly onMessage = (e: MessageEvent) => {
     const message = JSON.parse(e.data) as NicoliveWsReceiveMessage;
-    this.receiver.onWsMessage.emit(message.type, (<any>message).data);
+    this.subscriber.onWsMessage.emit(message.type, (<any>message).data);
 
     if (message.type === "seat") {
       this.startKeepInterval(message.data.keepIntervalSec);
@@ -78,7 +78,7 @@ export class NicoliveWsClient {
 
   private readonly onClose = () => {
     // 接続が正常に終了した場合はこの関数はウェブソケットから呼び出されない
-    this.receiver.onWsState.emit("disconnected");
+    this.subscriber.onWsState.emit("disconnected");
     this.stopKeepInterval();
   };
 

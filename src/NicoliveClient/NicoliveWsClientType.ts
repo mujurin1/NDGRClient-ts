@@ -148,7 +148,7 @@ export type NicoliveWsReceiveMessage =
   | NicoliveWsReceiveStatistics_Deprecated
   | NicoliveWsReceiveSchedule
   | NicoliveWsReceivePing
-  | NicoliveWsReceiveDisconect
+  | NicoliveWsReceiveDisconnect
   | NicoliveWsReceiveReconnect
   | NicoliveWsReceivePostCommentResult
   | NicoliveWsReceiveTagUpdated_Deprecated
@@ -273,7 +273,6 @@ export interface NicoliveWsReceiveStatistics_Deprecated {
     /** ギフトポイント数 */
     giftPoints: number;
   };
-
 }
 
 /**
@@ -301,7 +300,7 @@ export interface NicoliveWsReceivePing {
 /**
  * コネクションの切断を通知するメッセージ
  */
-export interface NicoliveWsReceiveDisconect {
+export interface NicoliveWsReceiveDisconnect {
   type: "disconnect";
   data: {
     /** 切断の理由 */

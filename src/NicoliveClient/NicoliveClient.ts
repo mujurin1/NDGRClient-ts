@@ -4,7 +4,7 @@ import { EventTrigger, type IEventTrigger } from "../lib/EventTrigger";
 import { promiser, sleep } from "../lib/utils";
 import { NicoliveMessageClient } from "./NicoliveMessageClient";
 import { NicoliveWsClient } from "./NicoliveWsClient";
-import type { NicoliveCommentColor_Fixed, NicoliveWsSendPostComment } from "./NicoliveWsClientType";
+import type { NicoliveCommentColor_Fixed, NicoliveWsReceiveMessageServer, NicoliveWsReceiveReconnect, NicoliveWsReceiveSchedule, NicoliveWsSendPostComment } from "./NicoliveWsClientType";
 import type { NicoliveClientLog, NicoliveInfo, NicoliveWsReceiveMessageType } from "./type";
 import { type NicoliveId, NicoliveWatchError, checkCloseMessage, getNicoliveId } from "./utils";
 
@@ -12,9 +12,9 @@ import { type NicoliveId, NicoliveWatchError, checkCloseMessage, getNicoliveId }
 export type NicoliveClientState = "connecting" | "opened" | "reconnecting" | "reconnect_failed" | "disconnected";
 
 /**
- * ニコ生に接続するクライアント
+ * WsClient, MessageClient に通知してもらう
  */
-export interface INicoliveClient {
+export interface INicoliveClientSubscriber {
   //#region NicoliveWsClient 用
   /**
    * ウェブソケットの状態を通知する
@@ -52,8 +52,7 @@ export interface INicoliveClient {
   //#endregion NicoliveMessageClient 用
 }
 
-export class NicoliveClient implements INicoliveClient {
-  private _disposed = false;
+export class NicoliveClient implements INicoliveClientSubscriber {
   /**
    * ネットワークエラーが発生した時に再接続するインターバル\
    * 再接続されるまでトライする`n`回目の待機時間`n:value`
@@ -108,9 +107,9 @@ export class NicoliveClient implements INicoliveClient {
    */
   constructor(
     pageData: NicolivePageData,
-    fromSec: number | "now",
-    minBackwards: number,
-    isSnapshot: boolean,
+    private readonly fromSec: number | "now",
+    private readonly minBackwards: number,
+    private readonly isSnapshot: boolean,
   ) {
     this.info = pageData.nicoliveInfo;
     if (!pageData.websocketUrl) {
@@ -124,70 +123,11 @@ export class NicoliveClient implements INicoliveClient {
 
     this.wsClient = new NicoliveWsClient(this, this.websocketUrl);
 
-    this.onState.emit("connecting");
-
+    //#region Subscribe
     this.onWsMessage
-      .on("schedule", data => {
-        // MEMO: 公式放送はスケジュールが来ない?
-        this.beginTime = new Date(data.begin);
-        this.endTime = new Date(data.end);
-      })
-      .on("messageServer", data => {
-        let skipTo: string | undefined;
-        this.vposBaseTimeMs = new Date(data.vposBaseTime).getTime();
-
-        // `this._reconnecting === true`なら必ず`this.messageClient != null`
-        if (!this._reconnecting || this.messageClient == null) {
-          this.messageClient = new NicoliveMessageClient(this, data.viewUri, isSnapshot);
-        } else {
-          // 再接続時には取得する開始の時刻, それ以前は不要 で取得開始する
-          fromSec = Number(this._lastFetchMessage!.meta!.at!.seconds);
-          minBackwards = 1; // 0 だと最後のメッセージがチャンクの最後だった場合に恐らくメッセージを受信できない
-          skipTo = this._lastFetchMessage!.meta!.id;
-        }
-
-        this.messageClient.connect(fromSec, minBackwards, skipTo)
-          .catch(async (e: unknown) => {
-            if (e instanceof Error && e.message === "Failed to fetch") {
-              // ネットワーク障害時に再接続する
-              this._reconnecting = true;
-
-              this.onState.emit("reconnecting");
-              this.wsClient.close(true);
-
-              for (const intervalSec of this._reconnectIntervalsSec) {
-                this.onLog.emit("info", { type: "reconnect", sec: intervalSec });
-                await sleep(intervalSec * 1e3);
-
-                const succsessed = await this._reconnectWs();
-
-                if (succsessed) {
-                  this.onLog.emit("info", { type: "reconnect" });
-                  return;
-                }
-              }
-
-              this._reconnecting = false;
-              this.onLog.emit("error", { type: "reconnect_failed" });
-              this.close();
-            } else {
-              this.onLog.emit("error", { type: "unknown_error", error: e });
-              throw e;
-            }
-          });
-      })
-      .on("reconnect", ({ audienceToken, waitTimeSec }) => {
-        // MEMO: この関数は全くテストをしていません
-        this.onLog.emit(
-          "info",
-          { type: "any_info", message: `ウェブソケットの再接続要求を受け取りました\n${waitTimeSec}秒後にウェブソケットを切断して再接続します` }
-        );
-        this.websocketUrl = replaceToken(this.websocketUrl, audienceToken);
-
-        setTimeout(() => {
-          void this.reconnect();
-        }, waitTimeSec * 1e3);
-      });
+      .on("schedule", this.onSchedule)
+      .on("messageServer", this.onMessageServer)
+      .on("reconnect", this.onReconnect);
 
     this.onWsState.on(event => {
       if (event === "disconnected") this.close();
@@ -197,20 +137,12 @@ export class NicoliveClient implements INicoliveClient {
       else this.close();
     });
 
-    this.onMessage.on(message => {
-      if (message.meta?.at == null) return;
+    this.onMessage.on(this.onMessage_updateLast);
+    this.onMessageOld.on(messages => this.onMessage_updateLast(messages.at(-1)));
+    //#endregion Subscribe
 
-      this._lastFetchMessage = message;
-    });
-    this.onMessageOld.on(messages => {
-      const message = messages.at(-1);
-      if (message?.meta?.at == null) return;
-      if (this._lastFetchMessage == null || this._lastFetchMessage.meta!.at!.seconds < message.meta.at.seconds) {
-        this._lastFetchMessage = message;
-      }
-    });
+    this.onState.emit("connecting");
   }
-
   /**
    * ニコニコ生放送と通信するクライアントを生成します
    * @param liveIdOrUrl 接続する放送ID. `lv*` `ch*` `user/*` を含む文字列
@@ -224,7 +156,7 @@ export class NicoliveClient implements INicoliveClient {
     const pageData = await fetchLivePageData(liveId);
 
     return new NicoliveClient(pageData, fromSec, minBackwards, isSnapshot);
-  }
+  };
 
   /**
    * 視聴者コメントとして投稿する
@@ -232,7 +164,7 @@ export class NicoliveClient implements INicoliveClient {
    * @param isAnonymous 匿名にするか. 未指定時は`false`
    * @param options コマンドオプション
    */
-  public postComment(text: string, isAnonymous: boolean = false, options?: Omit<NicoliveWsSendPostComment["data"], "text" | "vpos" | "isAnonymous">) {
+  public postComment(text: string, isAnonymous: boolean = false, options?: Omit<NicoliveWsSendPostComment["data"], "text" | "vpos" | "isAnonymous">): void {
     if (this.info.loginUser == null) {
       throw new Error("ログインしていないためコメントの投稿は出来ません");
     }
@@ -255,7 +187,7 @@ export class NicoliveClient implements INicoliveClient {
    * @param isPermanent コメントを永続化 (固定) するか
    * @param command カラー
    */
-  public async postBroadcasterComment(text: string, name?: string, isPermanent = false, command?: NicoliveCommentColor_Fixed) {
+  public async postBroadcasterComment(text: string, name?: string, isPermanent = false, command?: NicoliveCommentColor_Fixed): Promise<void> {
     if (this.info.owner.id == null || this.info.owner.id !== this.info.loginUser?.id) {
       throw new Error("放送者でないため放送者コメントの投稿は出来ません");
     }
@@ -275,7 +207,7 @@ export class NicoliveClient implements INicoliveClient {
   /**
    * 放送者の固定コメントを削除する
    */
-  public async deletePermanentComment() {
+  public async deletePermanentComment(): Promise<void> {
     if (this.info.loginUser?.isBroadcaster !== true) {
       throw new Error("放送者でないため放送者コメントの削除は出来ません");
     }
@@ -289,7 +221,11 @@ export class NicoliveClient implements INicoliveClient {
     });
   }
 
-  public async fetchBackwardMessages(minBackwards: number) {
+  /**
+   * 過去メッセージを取得する
+   * @param minBackwards 取得する過去メッセージの最低数
+   */
+  public async fetchBackwardMessages(minBackwards: number): Promise<void> {
     if (this.messageClient == null) return;
     const currentClient = this.messageClient;
 
@@ -303,14 +239,20 @@ export class NicoliveClient implements INicoliveClient {
     );
 
     this._stopFetchBackwardMessages = false;
-  }
+  };
 
-  public stopFetchBackwardMessages() {
+  /**
+   * 過去メッセージを取得中だった場合に中断してその時点までのメッセージを通知します
+   */
+  public stopFetchBackwardMessages(): void {
     if (!this.messageClient?.isFetchingBackwardMessage) return;
     this._stopFetchBackwardMessages = true;
-  }
+  };
 
-  public close() {
+  /**
+   * 接続を終了します
+   */
+  public close(): void {
     if (this._reconnecting) {
       this.onState.emit("reconnect_failed");
     } else {
@@ -321,11 +263,12 @@ export class NicoliveClient implements INicoliveClient {
     this.messageClient?.close();
   }
 
-  public dispose() {
-    if (this._disposed) return;
-    this._disposed = true;
-    this.close();
-    this.messageClient = undefined;
+  /**
+   * 再接続可能(する必要がある)か調べる
+   * @returns `true`なら再接続可能
+   */
+  public canReconnect(): boolean {
+    return !this._reconnecting && !checkCloseMessage(this._lastFetchMessage);
   }
 
   /**
@@ -351,19 +294,11 @@ export class NicoliveClient implements INicoliveClient {
   }
 
   /**
-   * 再接続可能(する必要がある)か調べる
-   * @returns 
-   */
-  public canReconnect() {
-    return !this._reconnecting && !checkCloseMessage(this._lastFetchMessage);
-  }
-
-  /**
    * ウェブソケットに再接続する\
    * フラグの変更やメッセージの送信は行わない
    * @returns 再接続に成功したか
    */
-  private async _reconnectWs() {
+  private async _reconnectWs(): Promise<boolean> {
     this.wsClient.close(true);
 
     this.wsClient = new NicoliveWsClient(
@@ -387,6 +322,87 @@ export class NicoliveClient implements INicoliveClient {
       return true;
     } else return false;
   }
+
+  private readonly onSchedule = (data: NicoliveWsReceiveSchedule["data"]): void => {
+    // MEMO: 公式放送はスケジュールが来ない?
+    this.beginTime = new Date(data.begin);
+    this.endTime = new Date(data.end);
+  };
+
+  private readonly onMessageServer = (data: NicoliveWsReceiveMessageServer["data"]): void => {
+    this.vposBaseTimeMs = new Date(data.vposBaseTime).getTime();
+
+    let fromSec = this.fromSec;
+    let minBackwards = this.minBackwards;
+    let skipTo: string | undefined;
+
+    // `this._reconnecting === true`なら必ず`this.messageClient != null`
+    if (this._reconnecting && this.messageClient != null) {
+      // 再接続時には取得する開始の時刻, それ以前は不要 で取得開始する
+      fromSec = Number(this._lastFetchMessage!.meta!.at!.seconds);
+      // minBackwards:0 だと最後のメッセージがチャンクの最後だった場合に恐らくメッセージを受信できない危惧があるが問題ないと信じている
+      minBackwards = 0;
+      skipTo = this._lastFetchMessage!.meta!.id;
+    } else {
+      this.messageClient = new NicoliveMessageClient(this, data.viewUri, this.isSnapshot);
+    }
+
+    void this.messageClient.connect(fromSec, minBackwards, skipTo)
+      .catch(this.onConnectErrorCatch);
+  };
+
+  private readonly onReconnect = ({ audienceToken, waitTimeSec }: NicoliveWsReceiveReconnect["data"]): void => {
+    // MEMO: この関数は全くテストをしていません
+    this.onLog.emit(
+      "info",
+      { type: "any_info", message: `ウェブソケットの再接続要求を受け取りました\n${waitTimeSec}秒後にウェブソケットを切断して再接続します` }
+    );
+    this.websocketUrl = replaceToken(this.websocketUrl, audienceToken);
+
+    setTimeout(() => {
+      void this.reconnect();
+    }, waitTimeSec * 1e3);
+  };
+
+  private readonly onMessage_updateLast = (message?: dwango.ChunkedMessage): void => {
+    if (message?.meta?.at == null) return;
+    if (
+      this._lastFetchMessage == null ||
+      this._lastFetchMessage.meta!.at!.seconds < message.meta.at.seconds
+    ) {
+      this._lastFetchMessage = message;
+    }
+  };
+
+
+  private readonly onConnectErrorCatch = async (error: unknown): Promise<void> => {
+    if (error instanceof Error && error.message === "Failed to fetch") {
+      // ネットワーク障害時に再接続する
+      this._reconnecting = true;
+
+      this.onState.emit("reconnecting");
+      this.wsClient.close(true);
+
+      for (const intervalSec of this._reconnectIntervalsSec) {
+        this.onLog.emit("info", { type: "reconnect", sec: intervalSec });
+        await sleep(intervalSec * 1e3);
+
+        const succsessed = await this._reconnectWs();
+
+        if (succsessed) {
+          this.onLog.emit("info", { type: "reconnect" });
+          return;
+        }
+      }
+
+      this._reconnecting = false;
+      this.onLog.emit("error", { type: "reconnect_failed" });
+      this.close();
+    } else {
+      this.onLog.emit("error", { type: "unknown_error", error: error });
+      throw error;
+    }
+  };
 }
 
 /**
