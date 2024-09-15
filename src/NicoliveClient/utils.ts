@@ -1,5 +1,6 @@
 import * as protobuf from "@bufbuild/protobuf";
 import { BinaryReader } from "@bufbuild/protobuf/wire";
+import * as dwango from "../gen/dwango_pb";
 
 export async function* readProtobufStream<Desc extends protobuf.DescMessage>(uri: string, messageType: Desc) {
   const res = await fetch(uri);
@@ -21,6 +22,14 @@ export function getNicoliveId(liveIdOrUrl: string): NicoliveId | undefined {
 
 export type NicoliveId = `${"lv" | "ch" | "user/"}${number}`;
 
+
+export function checkCloseMessage(message?: dwango.ChunkedMessage) {
+  return (
+    message != null &&
+    message.payload.case === "state" &&
+    message.payload.value.programStatus?.state === dwango.ProgramStatus_State.Ended
+  );
+}
 
 
 // https://github.com/bufbuild/protobuf-es/blob/main/packages/protobuf/src/wire/size-delimited.ts#L51

@@ -2,7 +2,7 @@ import * as protobuf from "@bufbuild/protobuf";
 import * as dwango from "../gen/dwango_pb";
 import { sleep } from "../lib/utils";
 import type { INicoliveClient } from "./type";
-import { readProtobufStream } from "./utils";
+import { checkCloseMessage, readProtobufStream } from "./utils";
 
 /**
  * ニコ生メッセージサーバーと接続するクライアント
@@ -159,7 +159,7 @@ export class NicoliveMessageClient {
       return;
     }
 
-    if (this.checkCloseMessage(message)) this.close();
+    if (checkCloseMessage(message)) this.close();
 
     this.receiver.onMessage.emit(message);
   }
@@ -173,17 +173,9 @@ export class NicoliveMessageClient {
     }
 
     const last = messages.at(-1);
-    if (this.checkCloseMessage(last)) this.close();
+    if (checkCloseMessage(last)) this.close();
 
     this.receiver.onMessageOld.emit(messages);
-  }
-
-  private checkCloseMessage(message?: dwango.ChunkedMessage) {
-    return (
-      message != null &&
-      message.payload.case === "state" &&
-      message.payload.value.programStatus?.state === dwango.ProgramStatus_State.Ended
-    );
   }
 
   private async fetchMessages(uri: string) {

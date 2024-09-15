@@ -6,7 +6,7 @@ import { NicoliveMessageClient } from "./NicoliveMessageClient";
 import { NicoliveWsClient } from "./NicoliveWsClient";
 import type { NicoliveCommentColor_Fixed, NicoliveWsSendPostComment } from "./NicoliveWsClientType";
 import type { DisconnectType, INicoliveClient, NicoliveClientLog, NicoliveClientState, NicoliveInfo, NicoliveWsReceiveMessageType } from "./type";
-import { type NicoliveId, NicoliveWatchError, getNicoliveId } from "./utils";
+import { type NicoliveId, NicoliveWatchError, checkCloseMessage, getNicoliveId } from "./utils";
 
 export class NicoliveClient implements INicoliveClient {
   private _disposed = false;
@@ -22,7 +22,7 @@ export class NicoliveClient implements INicoliveClient {
    * 最後に受信したメッセージの情報\
    * 再接続時に使うため
    */
-  private _lastFetchMessageMeta: dwango.ChunkedMessage_Meta | undefined;
+  private _lastFetchMessage: dwango.ChunkedMessage | undefined;
 
   /** 過去メッセージの取得を中断するか */
   private _stopFetchBackwardMessages = false;
@@ -97,9 +97,9 @@ export class NicoliveClient implements INicoliveClient {
           this.messageClient = new NicoliveMessageClient(this, data.viewUri, isSnapshot);
         } else {
           // 再接続時には取得する開始の時刻, それ以前は不要 で取得開始する
-          fromSec = Number(this._lastFetchMessageMeta!.at!.seconds);
+          fromSec = Number(this._lastFetchMessage!.meta!.at!.seconds);
           minBackwards = 1; // 0 だと最後のメッセージがチャンクの最後だった場合に恐らくメッセージを受信できない
-          skipTo = this._lastFetchMessageMeta!.id;
+          skipTo = this._lastFetchMessage!.meta!.id;
         }
 
         this.messageClient.connect(fromSec, minBackwards, skipTo)
@@ -156,13 +156,13 @@ export class NicoliveClient implements INicoliveClient {
     this.onMessage.on(message => {
       if (message.meta?.at == null) return;
 
-      this._lastFetchMessageMeta = message.meta;
+      this._lastFetchMessage = message;
     });
     this.onMessageOld.on(messages => {
       const message = messages.at(-1);
       if (message?.meta?.at == null) return;
-      if (this._lastFetchMessageMeta == null || this._lastFetchMessageMeta.at!.seconds < message.meta.at.seconds) {
-        this._lastFetchMessageMeta = message.meta;
+      if (this._lastFetchMessage == null || this._lastFetchMessage.meta!.at!.seconds < message.meta.at.seconds) {
+        this._lastFetchMessage = message;
       }
     });
   }
@@ -290,6 +290,7 @@ export class NicoliveClient implements INicoliveClient {
    */
   public async reconnect(): Promise<boolean> {
     if (this.wsClient.isConnect() && this.messageClient?.isConnect() === true) return true;
+    if (checkCloseMessage(this._lastFetchMessage)) return true;
 
     this._reconnecting = true;
     this.onState.emit("reconnecting");
