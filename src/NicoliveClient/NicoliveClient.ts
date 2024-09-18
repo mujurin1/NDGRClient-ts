@@ -342,16 +342,14 @@ export class NicoliveClient implements INicoliveClientSubscriber {
     let minBackwards = this.minBackwards;
     let skipTo: string | undefined;
 
-    // `this._reconnecting === true`なら必ず`this.messageClient != null`
-    if (this._reconnecting && this.messageClient != null) {
+    if (this._reconnecting) {
       // 再接続時には取得する開始の時刻, それ以前は不要 で取得開始する
-      fromSec = Number(this._lastFetchMessage!.meta!.at!.seconds);
-      // minBackwards:0 だと最後のメッセージがチャンクの最後だった場合に恐らくメッセージを受信できない危惧があるが問題ないと信じている
+      fromSec = Number(this._lastFetchMessage!.meta!.at!.seconds) - 5;
       minBackwards = 0;
       skipTo = this._lastFetchMessage!.meta!.id;
-    } else {
-      this.messageClient = new NicoliveMessageClient(this, data.viewUri, this.isSnapshot);
     }
+
+    this.messageClient = new NicoliveMessageClient(this, data.viewUri, this.isSnapshot);
 
     void this.messageClient.connect(fromSec, minBackwards, skipTo)
       .catch(this.onConnectErrorCatch);

@@ -8,6 +8,7 @@ import { checkCloseMessage, readProtobufStream } from "./utils";
  * ニコ生メッセージサーバーと接続するクライアント
  */
 export class NicoliveMessageClient {
+  /** `_closeReservation`が`true`でも実際に接続が終了するまでは`true` */
   private _connecting = false;
   /** 接続を外部から終了する場合に`true`になる */
   private _closeReservation = false;
@@ -60,15 +61,8 @@ export class NicoliveMessageClient {
    * @param skipTo 指定したIDのメッセージの次までスキップする (このIDの次のメッセージから通知される)
    */
   public async connect(fromSec: number | "now", minBackwards: number, skipTo?: string) {
-    if (this._connecting) {
-      if (this._closeReservation) {
-        this._closeReservation = false;
-        this.subscriber.onMessageState.emit("opened");
-      }
-      return;
-    }
+    if (this._connecting) return;
 
-    this._closeReservation = false;
     this._skipTo = skipTo;
     this._connecting = true;
 
@@ -91,26 +85,18 @@ export class NicoliveMessageClient {
           await this.receiveEntry(entry, minBackwards);
         }
       }
-
+    } finally {
       this._connecting = false;
       if (!this._closeReservation) {
         this.subscriber.onMessageState.emit("disconnected");
       }
       this._closeReservation = false;
-    } catch (e) {
-      this._connecting = false;
-      if (!this._closeReservation) {
-        this.subscriber.onMessageState.emit("disconnected");
-      }
-      this._closeReservation = false;
-
-      throw e;
     }
   }
 
   /**
    * 接続を終了する\
-   * 現在取得中のストリームを取り終えるまでは終了しない
+   * 内部の接続はすぐには終了しない
    */
   public close() {
     if (!this.isConnect()) return;
@@ -153,36 +139,24 @@ export class NicoliveMessageClient {
     }
   }
 
+  private async fetchMessages(uri: string) {
+    for await (const msg of readProtobufStream(uri, dwango.ChunkedMessageSchema)) {
+      if (this._closeReservation) return;
+      this.receiveMessage(msg);
+    }
+  }
+
   private receiveMessage(message: dwango.ChunkedMessage) {
-    if (this._skipTo != null && message.meta != null) {
-      if (this._skipTo === message.meta.id) this._skipTo = undefined;
+    if (this._skipTo != null) {
+      if (this._skipTo === message.meta?.id) {
+        this._skipTo = undefined;
+      }
       return;
     }
 
     if (checkCloseMessage(message)) this.close();
 
     this.subscriber.onMessage.emit(message);
-  }
-
-  private receiveMessageOld(messages: dwango.ChunkedMessage[]) {
-    for (const message of messages) {
-      if (this._skipTo != null && message.meta != null) {
-        if (this._skipTo !== message.meta.id) return;
-        this._skipTo = undefined;
-      }
-    }
-
-    const last = messages.at(-1);
-    if (checkCloseMessage(last)) this.close();
-
-    this.subscriber.onMessageOld.emit(messages);
-  }
-
-  private async fetchMessages(uri: string) {
-    for await (const msg of readProtobufStream(uri, dwango.ChunkedMessageSchema)) {
-      if (this._closeReservation) return;
-      this.receiveMessage(msg);
-    }
   }
 
   /**
@@ -239,5 +213,19 @@ export class NicoliveMessageClient {
     }
 
     this.receiveMessageOld(buf.reverse().flat());
+  }
+
+  private receiveMessageOld(messages: dwango.ChunkedMessage[]) {
+    for (const message of messages) {
+      if (this._skipTo != null && message.meta != null) {
+        if (this._skipTo !== message.meta.id) return;
+        this._skipTo = undefined;
+      }
+    }
+
+    const last = messages.at(-1);
+    if (checkCloseMessage(last)) this.close();
+
+    this.subscriber.onMessageOld.emit(messages);
   }
 }
