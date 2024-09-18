@@ -140,7 +140,10 @@ export class NicoliveClient implements INicoliveClientSubscriber {
     });
 
     this.onMessage.on(this.onMessage_updateLast);
-    this.onMessageOld.on(messages => this.onMessage_updateLast(messages.at(-1)));
+    this.onMessageOld.on(messages => {
+      if (this._lastFetchMessage != null)
+        this.onMessage_updateLast(messages.at(-1));
+    });
     //#endregion Subscribe
 
     this.onState.emit("connecting", undefined);
@@ -369,12 +372,8 @@ export class NicoliveClient implements INicoliveClientSubscriber {
 
   private readonly onMessage_updateLast = (message?: dwango.ChunkedMessage): void => {
     if (message?.meta?.at == null) return;
-    if (
-      this._lastFetchMessage == null ||
-      this._lastFetchMessage.meta!.at!.seconds < message.meta.at.seconds
-    ) {
-      this._lastFetchMessage = message;
-    }
+
+    this._lastFetchMessage = message;
   };
 
 
