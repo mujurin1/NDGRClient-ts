@@ -118,6 +118,7 @@ export class NicoliveClient implements INicoliveClientSubscriber {
       throw new NicoliveWatchError(this.info.liveId);
     }
 
+    this._lastFetchMessage = undefined;
     this.websocketUrl = pageData.websocketUrl;
     this.beginTime = new Date(pageData.beginTime * 1e3);
     this.endTime = new Date(pageData.endTime * 1e3);
@@ -141,7 +142,7 @@ export class NicoliveClient implements INicoliveClientSubscriber {
 
     this.onMessage.on(this.onMessage_updateLast);
     this.onMessageOld.on(messages => {
-      if (this._lastFetchMessage != null)
+      if (this._lastFetchMessage == null)
         this.onMessage_updateLast(messages.at(-1));
     });
     //#endregion Subscribe
@@ -342,11 +343,11 @@ export class NicoliveClient implements INicoliveClientSubscriber {
     let minBackwards = this.minBackwards;
     let skipTo: string | undefined;
 
-    if (this._reconnecting) {
+    if (this._reconnecting && this._lastFetchMessage != null) {
       // 再接続時には取得する開始の時刻, それ以前は不要 で取得開始する
-      fromSec = Number(this._lastFetchMessage!.meta!.at!.seconds) - 5;
+      fromSec = Number(this._lastFetchMessage.meta!.at!.seconds) - 5;
       minBackwards = 0;
-      skipTo = this._lastFetchMessage!.meta!.id;
+      skipTo = this._lastFetchMessage.meta!.id;
     }
 
     this.messageClient = new NicoliveMessageClient(this, data.viewUri, this.isSnapshot);
