@@ -4,7 +4,7 @@ import { EventTrigger, type IEventTrigger } from "../lib/EventTrigger";
 import { promiser, sleep } from "../lib/utils";
 import { NicoliveMessageClient } from "./NicoliveMessageClient";
 import { NicoliveWsClient } from "./NicoliveWsClient";
-import type { NicoliveCommentColor_Fixed, NicoliveWsReceiveMessageServer, NicoliveWsReceiveReconnect, NicoliveWsReceiveSchedule, NicoliveWsSendPostComment } from "./NicoliveWsClientType";
+import type { NicoliveCommentColor_Fixed, NicoliveDisconectReason, NicoliveWsReceiveMessageServer, NicoliveWsReceiveReconnect, NicoliveWsReceiveSchedule, NicoliveWsSendPostComment } from "./NicoliveWsClientType";
 import type { NicoliveClientLog, NicoliveInfo, NicoliveWsReceiveMessageType } from "./type";
 import { type NicoliveId, NicoliveWatchError, checkCloseMessage, getNicoliveId } from "./utils";
 
@@ -19,7 +19,7 @@ export interface INicoliveClientSubscriber {
   /**
    * ウェブソケットの状態を通知する
    */
-  readonly onWsState: IEventTrigger<["opened" | "reconnecting" | "disconnected"]>;
+  readonly onWsState: IEventTrigger<["opened" | "reconnecting" | "disconnected", NicoliveDisconectReason | undefined]>;
 
   /**
    * {@link NicoliveWsReceiveMessage} を通知する
@@ -52,7 +52,7 @@ export interface INicoliveClientSubscriber {
   //#endregion NicoliveMessageClient 用
 }
 
-export type DisconnectType = undefined | "user" | "ws_close" | "message_close" | "reconnect_failed" | "unknown";
+export type DisconnectType = undefined | "user" | "ws_close" | ["ws_close_message", NicoliveDisconectReason] | "message_close" | "reconnect_failed" | "unknown";
 
 export class NicoliveClient implements INicoliveClientSubscriber {
   /**
@@ -65,9 +65,14 @@ export class NicoliveClient implements INicoliveClientSubscriber {
 
   /**
    * 最後に受信したメッセージの情報\
-   * 再接続時に使うため
+   * 再接続時に使う
    */
   private _lastFetchMessage: dwango.ChunkedMessage | undefined;
+  /**
+   * 接続中の`viewUri`\
+   * 再接続に使う
+   */
+  private _viewUri: string | undefined;
 
   /** 過去メッセージの取得を中断するか */
   private _stopFetchBackwardMessages = false;
@@ -77,7 +82,7 @@ export class NicoliveClient implements INicoliveClientSubscriber {
   public readonly onLog = new EventEmitter<NicoliveClientLog>();
 
   public wsClient: NicoliveWsClient;
-  public readonly onWsState = new EventTrigger<["opened" | "reconnecting" | "disconnected"]>();
+  public readonly onWsState = new EventTrigger<["opened" | "reconnecting" | "disconnected", NicoliveDisconectReason | undefined]>();
   public readonly onWsMessage = new EventEmitter<NicoliveWsReceiveMessageType>();
 
   public messageClient?: NicoliveMessageClient;
@@ -132,8 +137,16 @@ export class NicoliveClient implements INicoliveClientSubscriber {
       .on("messageServer", this.onMessageServer)
       .on("reconnect", this.onReconnect);
 
-    this.onWsState.on(event => {
-      if (event === "disconnected") this.close("ws_close");
+    this.onWsState.on((event, reason) => {
+      if (event === "disconnected") {
+        // 再接続前に放送が終わっていた場合はメッセージサーバーに接続する
+        if (this._reconnecting && reason === "END_PROGRAM") {
+          this.connectMessageClient(this._viewUri!);
+          return;
+        }
+        if (reason == null) this.close("ws_close");
+        else this.close(["ws_close_message", reason]);
+      }
     });
     this.onMessageState.on(event => {
       if (event === "opened") this.onState.emit("opened", undefined);
@@ -258,8 +271,10 @@ export class NicoliveClient implements INicoliveClientSubscriber {
   /**
    * 接続を終了します
    * @param description 終了理由
+   * @param reason WebSocket から接続終了した場合の終了理由
    */
   public close(description: DisconnectType = "user"): void {
+    // if (this._reconnecting && description === "reconnect_failed") {
     if (this._reconnecting) {
       this.onState.emit("reconnect_failed", description);
     } else {
@@ -320,8 +335,6 @@ export class NicoliveClient implements INicoliveClientSubscriber {
       if (message === "opened") resolver(true);
       else if (message === "reconnect_failed") resolver(false);
       else return;
-
-      return true;
     });
 
     if (await promise) {
@@ -338,22 +351,8 @@ export class NicoliveClient implements INicoliveClientSubscriber {
 
   private readonly onMessageServer = (data: NicoliveWsReceiveMessageServer["data"]): void => {
     this.vposBaseTimeMs = new Date(data.vposBaseTime).getTime();
-
-    let fromSec = this.fromSec;
-    let minBackwards = this.minBackwards;
-    let skipTo: string | undefined;
-
-    if (this._reconnecting && this._lastFetchMessage != null) {
-      // 再接続時には取得する開始の時刻, それ以前は不要 で取得開始する
-      fromSec = Number(this._lastFetchMessage.meta!.at!.seconds) - 5;
-      minBackwards = 0;
-      skipTo = this._lastFetchMessage.meta!.id;
-    }
-
-    this.messageClient = new NicoliveMessageClient(this, data.viewUri, this.isSnapshot);
-
-    void this.messageClient.connect(fromSec, minBackwards, skipTo)
-      .catch(this.onConnectErrorCatch);
+    this._viewUri = data.viewUri;
+    this.connectMessageClient(this._viewUri);
   };
 
   private readonly onReconnect = ({ audienceToken, waitTimeSec }: NicoliveWsReceiveReconnect["data"]): void => {
@@ -377,6 +376,8 @@ export class NicoliveClient implements INicoliveClientSubscriber {
 
 
   private readonly onConnectErrorCatch = async (error: unknown): Promise<void> => {
+    console.log(error);
+
     if (error instanceof Error && error.message === "Failed to fetch") {
       // ネットワーク障害時に再接続する
       this._reconnecting = true;
@@ -400,11 +401,29 @@ export class NicoliveClient implements INicoliveClientSubscriber {
       this.onLog.emit("error", { type: "reconnect_failed" });
       this.close("reconnect_failed");
     } else {
-      this.onLog.emit("error", { type: "unknown_error", error: error });
+      this.onLog.emit("error", { type: "unknown_error", error });
       this.close("unknown");
       throw error;
     }
   };
+
+  private connectMessageClient(viewUri: string) {
+    let fromSec = this.fromSec;
+    let minBackwards = this.minBackwards;
+    let skipTo: string | undefined;
+
+    if (this._reconnecting && this._lastFetchMessage != null) {
+      // 再接続時には取得する開始の時刻, それ以前は不要 で取得開始する
+      fromSec = Number(this._lastFetchMessage.meta!.at!.seconds) - 5;
+      minBackwards = 0;
+      skipTo = this._lastFetchMessage.meta!.id;
+    }
+
+    this.messageClient = new NicoliveMessageClient(this, viewUri, this.isSnapshot);
+
+    void this.messageClient.connect(fromSec, minBackwards, skipTo)
+      .catch(this.onConnectErrorCatch);
+  }
 }
 
 /**

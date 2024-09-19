@@ -1,6 +1,6 @@
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import type { INicoliveClientSubscriber } from "./NicoliveClient";
-import type { NicoliveStream, NicoliveWsReceiveMessage, NicoliveWsSendMessage, NicoliveWsSendStartWatching } from "./NicoliveWsClientType";
+import type { NicoliveDisconectReason, NicoliveStream, NicoliveWsReceiveMessage, NicoliveWsSendMessage, NicoliveWsSendStartWatching } from "./NicoliveWsClientType";
 
 export class NicoliveWsClient {
   private readonly _ws: WebSocket;
@@ -42,20 +42,21 @@ export class NicoliveWsClient {
   /**
    * 接続を正常に終了する
    * @param reconnection 再接続するために終了する場合は`true`
+   * @param reason 切断理由
    */
-  public close(reconnection = false) {
+  public close(reconnection = false, reason?: NicoliveDisconectReason) {
     if (!this.isConnect()) return;
 
     this.stopKeepInterval();
     this._ws.onclose = null;
     this._ws.close();
 
-    if (reconnection) this.subscriber.onWsState.emit("reconnecting");
-    else this.subscriber.onWsState.emit("disconnected");
+    if (reconnection) this.subscriber.onWsState.emit("reconnecting", undefined);
+    else this.subscriber.onWsState.emit("disconnected", reason);
   }
 
   private readonly onOpen = () => {
-    this.subscriber.onWsState.emit("opened");
+    this.subscriber.onWsState.emit("opened", undefined);
 
     this.send({
       type: "startWatching",
@@ -74,13 +75,13 @@ export class NicoliveWsClient {
       this.send({ type: "pong" });
       this.send({ type: "keepSeat" });
     } else if (message.type === "disconnect") {
-      this.close();
+      this.close(false, message.data.reason);
     }
   };
 
   private readonly onClose = () => {
     // 接続が正常に終了した場合はこの関数はウェブソケットから呼び出されない
-    this.subscriber.onWsState.emit("disconnected");
+    this.subscriber.onWsState.emit("disconnected", undefined);
     this.stopKeepInterval();
   };
 

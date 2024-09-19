@@ -586,6 +586,18 @@ export const NicoliveDisconectReason = {
   serviceTemporarilyUnavailable: "SERVICE_TEMPORARILY_UNAVAILABLE",
 } as const;
 export type NicoliveDisconectReason = typeof NicoliveDisconectReason[keyof typeof NicoliveDisconectReason];
+export const NicoliveDisconectReasonDescription = {
+  [NicoliveDisconectReason.takeover]: "追い出された",
+  [NicoliveDisconectReason.noPermission]: "座席を取れなかった",
+  [NicoliveDisconectReason.endProgram]: "番組が終了した",
+  [NicoliveDisconectReason.pingTimeout]: "接続生存確認に失敗した (pingTimeout)",
+  [NicoliveDisconectReason.tooManyConnections]: "同一ユーザからの接続数上限を越えている",
+  [NicoliveDisconectReason.tooManyWatchings]: "同一ユーザの視聴番組数上限を越えている",
+  [NicoliveDisconectReason.crowded]: "満席",
+  [NicoliveDisconectReason.maintenanceIn]: "メンテナンス中",
+  [NicoliveDisconectReason.serviceTemporarilyUnavailable]: "一時的なサーバエラー",
+};
+
 
 export interface NicoliveTag {
   /** タグ内容 */

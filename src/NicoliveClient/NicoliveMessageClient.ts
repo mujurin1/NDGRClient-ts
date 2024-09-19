@@ -216,12 +216,7 @@ export class NicoliveMessageClient {
   }
 
   private receiveMessageOld(messages: dwango.ChunkedMessage[]) {
-    for (const message of messages) {
-      if (this._skipTo != null && message.meta != null) {
-        if (this._skipTo !== message.meta.id) return;
-        this._skipTo = undefined;
-      }
-    }
+    // 再接続時は過去コメントは取らないのでここで _skipTo を見る必要は無い
 
     const last = messages.at(-1);
     if (checkCloseMessage(last)) this.close();
