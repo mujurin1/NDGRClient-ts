@@ -14,11 +14,7 @@ export interface NicoliveInfo {
   readonly liveId: NicoliveId;
   readonly title: string;
 
-  /** 配信者の情報 */
-  readonly owner: {
-    readonly id: string | undefined;
-    readonly name: string;
-  };
+  readonly provider: NicoliveProvider;
 
   readonly loginUser: undefined | {
     readonly id: string;
@@ -34,6 +30,39 @@ export interface NicoliveInfo {
   /** 放送者コメントを送るためのトークン */
   readonly postBroadcasterCommentToken: string | undefined;
 }
+
+export type NicoliveProvider = NicoliveProviderUser | NicoliveProviderOfficial | NicoliveProviderChannel;
+
+export type NicoliveInfoProviderType = NicoliveProvider["type"];
+
+/** ユーザー放送 */
+export interface NicoliveProviderUser {
+  readonly type: "user";
+  /** 放送者ID */
+  readonly id: string;
+  /** 放送者名 */
+  readonly name: string;
+};
+/** 公式放送 */
+export interface NicoliveProviderOfficial {
+  readonly type: "official";
+  /** チャンネルID */
+  readonly id: `ch${string}`;
+  /** チャンネル名 */
+  readonly name: string;
+  /** 会社名 */
+  readonly companyName: "株式会社ドワンゴ";
+};
+/** チャンネル放送 */
+export interface NicoliveProviderChannel {
+  readonly type: "channel";
+  /** チャンネルID */
+  readonly id: `ch${string}`;
+  /** チャンネル名 */
+  readonly name: string;
+  /** 会社名 */
+  readonly companyName: string;
+};
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
 export type NicoliveClientLog = {

@@ -207,7 +207,10 @@ export class NicoliveClient implements INicoliveClientSubscriber {
    * @param command カラー
    */
   public async postBroadcasterComment(text: string, name?: string, isPermanent = false, command?: NicoliveCommentColor_Fixed): Promise<void> {
-    if (this.info.owner.id == null || this.info.owner.id !== this.info.loginUser?.id) {
+    if (
+      this.info.provider.type !== "user" ||
+      this.info.provider.id !== this.info.loginUser?.id
+    ) {
       throw new Error("放送者でないため放送者コメントの投稿は出来ません");
     }
 
@@ -456,10 +459,6 @@ async function fetchLivePageData(id: NicoliveId): Promise<NicolivePageData> {
       .getAttribute("data-props")!;
     const embeddedData = JSON.parse(embeddedString);
 
-    const ownerIdString = embeddedData.program.supplier.programProviderId;
-    let ownerId: string | undefined;
-    if (ownerIdString != null) ownerId = ownerIdString + "";
-
     data = {
       websocketUrl: throwIsNull(embeddedData.site.relive.webSocketUrl, "embeddedData.site.relive.webSocketUrl が存在しません"),
       beginTime: throwIsNull(embeddedData.program.beginTime, "embeddedData.program.beginTime が存在しません"),
@@ -469,10 +468,7 @@ async function fetchLivePageData(id: NicoliveId): Promise<NicolivePageData> {
       nicoliveInfo: {
         liveId: embeddedData.program.nicoliveProgramId,
         title: embeddedData.program.title,
-        owner: {
-          id: ownerId,
-          name: embeddedData.program.supplier.name,
-        },
+        provider: parseProvider(embeddedData),
         loginUser: embeddedData.user?.isLoggedIn !== true
           ? undefined
           : {
@@ -492,6 +488,35 @@ async function fetchLivePageData(id: NicoliveId): Promise<NicolivePageData> {
   }
 
   return data;
+}
+
+function parseProvider(embeddedData: any): NicoliveInfo["provider"] {
+  const program = embeddedData.program;
+  const social = embeddedData.socialGroup;
+
+  // MEMO: ニコ生から取得出来る値は "user" ではなく "community" なことに注意
+  const providerType: "community" | "official" | "channel" = program.providerType;
+  if (providerType === "community") {
+    return {
+      type: "user",
+      id: program.supplier.programProviderId + "",
+      name: program.supplier.name,
+    };
+  } else if (providerType === "official") {
+    return {
+      type: "official",
+      id: social.id,
+      name: social.name,
+      companyName: social.companyName,
+    };
+  } else {
+    return {
+      type: "channel",
+      id: social.id,
+      name: social.name,
+      companyName: social.companyName,
+    };
+  }
 }
 
 /**
