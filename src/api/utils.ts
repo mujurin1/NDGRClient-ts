@@ -103,7 +103,7 @@ function parseProvider(embedded: any): NicoliveInfo["provider"] {
   const socialGroup = getProps(embedded, "socialGroup");
   const supplier = getProps(program, "supplier");
 
-  // MEMO: ニコ生から取得出来る値は "user" ではなく "community" なことに注意
+  // program.providerType の "community" は "user" として扱う
   const providerType: "community" | "official" | "channel" =
     getProps(program, "providerType");
 

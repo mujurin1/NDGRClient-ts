@@ -13,6 +13,22 @@ export function isAbortError(error: unknown, signal: AbortSignal | undefined): b
   return signal?.aborted === true && error instanceof Error && error.name === "AbortError";
 }
 
+/**
+ * `AbortError`を安全にラップする\
+ * それ以外のエラーはラップしない
+ * @param promise 
+ * @param signal Promiseの終了理由が`AbortError`か
+ * @returns 
+ */
+export async function abortErrorWrap(promise: Promise<any>, signal: AbortSignal): Promise<boolean> {
+  try {
+    await promise;
+  } catch (e) {
+    if (isAbortError(e, signal)) return true;
+  }
+  return false;
+}
+
 export function createAbortError() {
   return new DOMException("操作が中止されました", "AbortError");
 }

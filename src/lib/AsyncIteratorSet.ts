@@ -52,7 +52,7 @@ export const AsyncIteratorSet = {
     const iterable = {
       next(): Promise<IteratorResult<T>> {
         if (queue.length > 0) return Promise.resolve({ value: queue.shift()!, done: false });
-        if (state === "iterating") return setNext();
+        if (state === "iterating") return nextPromise();
         if (state === "closed") return Promise.resolve({ value: undefined as any, done: true });
         throw error;
       },
@@ -68,7 +68,7 @@ export const AsyncIteratorSet = {
 
     return { iterator: iterable, enqueue, throw: throwError, close };
 
-    function setNext() {
+    function nextPromise() {
       return new Promise<IteratorResult<T>>((resolve, reject) => {
         resolveNext = resolve;
         rejectNext = reject;

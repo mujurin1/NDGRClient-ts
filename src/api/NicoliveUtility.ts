@@ -1,6 +1,6 @@
 import type { dwango } from "../_protobuf";
 import { AsyncIteratorSet } from "../lib/AsyncIteratorSet";
-import { promiser } from "../lib/utils";
+import { isAbortError, promiser } from "../lib/utils";
 import { NicoliveMessageServer, type NicoliveEntryAt } from "./NicoliveMessageServer";
 import { NicoliveWs, type MessageServerData, type NicoliveWsData } from "./NicoliveWs";
 import type { NicoliveCommentColor_Fixed, NicoliveStream, NicoliveWsReceiveMessage } from "./NicoliveWsType";
@@ -64,50 +64,49 @@ export const NicoliveUtility = {
    * @param liveIdOrUrl 接続する放送ID. `lv*` `ch*` `user/*` を含む文字列
    * @returns ニコ生視聴ページのデータ
    */
-  fetchNicolivePageData: async (liveIdOrUrl: string): Promise<NicolivePageData | undefined> => {
-    const liveId = getNicoliveId(liveIdOrUrl);
-    if (liveId == null) return;
-    const res = await fetch(`https://live.nicovideo.jp/watch/${liveId}`);
-    if (!res.ok) return undefined;
-    return await parseNicolivePageData(res);
+  fetchNicolivePageData: (liveIdOrUrl: string): AbortAndPromise<NicolivePageData | undefined> => {
+    return AbortAndPromise.new(async abortController => {
+      const liveId = getNicoliveId(liveIdOrUrl);
+      if (liveId == null) return;
+      const res = await fetch(`https://live.nicovideo.jp/watch/${liveId}`, { signal: abortController.signal });
+      if (!res.ok) return undefined;
+      return await parseNicolivePageData(res);
+    });
   },
   /**
    * ニコ生ウェブソケットサーバーと通信するオブジェクトを生成します\
-   * `messageServer`メッセージを受信してから値を返します
+   * プロミスはウェブソケットが接続してから値を返します
    * @param pageData ニコ生視聴ページの情報
-   * @param options メッセージを受信した時に呼び出される関数など
-   * @returns ニコ生ウェブソケットサーバーと通信するオブジェクト
+   * @param options TODO:
+   * @returns ニコ生ウェブソケットサーバーと通信するオブジェクトを返すプロミス
    */
-  createWsServerConnector: async (
+  createWsServerConnector: (
     pageData: NicolivePageData,
     options?: NicoliveWsConnectorOptions,
-  ): Promise<NicoliveWsServerConnector> => {
-    let connectSet = await createConnectSet(false, undefined);
+  ): AbortAndPromise<NicoliveWsServerConnector> => {
+    return AbortAndPromise.new(async abortController => {
+      let connectSet = await createConnectSet(abortController, undefined);
 
-    return {
-      isClosed: () => connectSet.isClosed(),
-      getAbortController: () => connectSet.abortController,
-      reconnect: async () => {
-        if (!connectSet.isClosed()) return;
-        const reconnectData = await connectSet.wsData.messageServerDataPromise;
-        connectSet = await createConnectSet(true, reconnectData);
-      },
-      getIterator: () => connectSet.wsData.iterator,
-      getWsData: () => connectSet.wsData,
-      connectMessageServer: async options => {
-        const data = await connectSet.wsData.messageServerDataPromise;
-        return connectMessageServer(
-          data.viewUri,
-          options,
-        );
-      },
-    };
+      return {
+        getPromise: () => connectSet.promise,
+        isClosed: () => connectSet.isClosed(),
+        getAbortController: () => connectSet.abortController,
+        reconnect: abortController => AbortAndPromise.newA(abortController, async abortController => {
+          if (!connectSet.isClosed()) return;
+          const reconnectData = await connectSet.wsData.messageServerDataPromise;
+          connectSet = await createConnectSet(abortController, reconnectData);
+        }),
+        getIterator: () => connectSet.wsData.iterator,
+        getWsData: () => connectSet.wsData,
+      };
+    });
 
-    async function createConnectSet(reconnect: boolean, reconnectData: MessageServerData | undefined) {
-      const abortController = new AbortController();
+    async function createConnectSet(abortController: AbortController, reconnectData: MessageServerData | undefined) {
       const wsData = await NicoliveWs.connectWaitOpened(pageData.websocketUrl, abortController.signal, reconnectData, options?.streamMessage);
+      const { promise, resolve } = promiser();
+      wsData.ws.addEventListener("close", onClose);
 
-      return { abortController, wsData, isClosed };
+      return { promise, abortController, wsData, isClosed };
 
       function isClosed() {
         const readyState = wsData.ws.readyState;
@@ -117,7 +116,88 @@ export const NicoliveUtility = {
           abortController.signal.aborted
         );
       }
+
+      function onClose() {
+        wsData.ws.removeEventListener("close", onClose);
+        resolve();
+      }
     }
+  },
+  /**
+   * ニコ生メッセージサーバーと通信するオブジェクトを生成します\
+   * プロミスはメッセージ受信用のフェッチが成功してから値を返します
+   * @param messageServerData `NicoliveWsReceiveMessageServer`
+   * @param options TODO:
+   * @returns ニコ生メッセージサーバーと通信するオブジェクトを返すプロミス
+   */
+  createMessageServerConnector: (
+    messageServerData: MessageServerData,
+    options?: NicoliveMessageConnectorOptions,
+  ): AbortAndPromise<NicoliveMessageServerConnector> => {
+    const entryUri = messageServerData.viewUri;
+
+    return AbortAndPromise.new(async abortController => {
+      let connectSet = await createConnectSet(abortController, options);
+
+      return {
+        getPromise: () => connectSet.promise,
+        isClosed: () => connectSet.entryFetcher.isClosed() && connectSet.messageFetcher.isClosed(),
+        getAbortController: () => connectSet.abortController,
+        reconnect: abortController => AbortAndPromise.newA(abortController, async abortController => {
+          if (!connectSet.entryFetcher.isClosed() || !connectSet.messageFetcher.isClosed()) return;
+          connectSet = await createConnectSet(
+            abortController,
+            {
+              at: connectSet.entryFetcher.getLastEntryAt(),
+              skipToMetaId: connectSet.messageFetcher.getLastMeta()?.id,
+              backwardUri: connectSet.messageFetcher.getBackwardUri(),
+            });
+        }),
+        getIterator: () => connectSet.messageFetcher.iterator,
+        getBackwardMessages: (delayMs, maxSegmentCount, isSnapshot) => {
+          const res = connectSet.messageFetcher.getBackwardMessages(delayMs, maxSegmentCount, isSnapshot);
+          return res;
+        },
+      };
+    });
+
+    async function createConnectSet(abortController: AbortController, options: NicoliveMessageConnectorOptions | undefined) {
+      const entryAt = options?.at ?? "now";
+      const entryFetcher = await createEntryFetcher(abortController, entryUri, entryAt);
+      const backwardUri = options?.backwardUri ?? {
+        segment: entryFetcher.backwardSegment.segment?.uri,
+        snapshot: entryFetcher.backwardSegment.snapshot?.uri,
+      };
+      const messageFetcher = await createServerMessageFetcher(abortController, entryFetcher, options?.skipToMetaId, backwardUri);
+
+      return {
+        promise: (async () => { await entryFetcher.promise; await messageFetcher.promise; })(),
+        abortController,
+        entryFetcher,
+        messageFetcher,
+      };
+    }
+  }
+} as const;
+
+export interface AbortAndPromise<T> {
+  readonly abortController: AbortController;
+  readonly promise: Promise<T>;
+};
+export const AbortAndPromise = {
+  new<T>(func: (abortController: AbortController) => Promise<T>): AbortAndPromise<T> {
+    const abortController = new AbortController();
+    return {
+      abortController,
+      promise: func(abortController),
+    };
+  },
+  newA<T>(abortController: AbortController | undefined, func: (abortController: AbortController) => Promise<T>): AbortAndPromise<T> {
+    abortController ??= new AbortController();
+    return {
+      abortController,
+      promise: func(abortController),
+    };
   }
 } as const;
 
@@ -126,6 +206,10 @@ export const NicoliveUtility = {
  * 再接続(reconnect)するたびに内部状態が更新され新しい値を返すようにする必要があります
  */
 export interface INicoliveServerConnector {
+  /**
+   * 接続が終了したら履行されるプロミス
+   */
+  getPromise(): Promise<void>;
   /**
    * 接続が終了しているか
    */
@@ -136,10 +220,10 @@ export interface INicoliveServerConnector {
   getAbortController(): AbortController;
   /**
    * 再接続します
+   * @param abortController 生成されるコネクターのAbortControllerとして利用されます
    */
-  reconnect(options?: NicoliveMessageConnectorOptions): Promise<void>;
+  reconnect(abortController?: AbortController): AbortAndPromise<void>;
 }
-
 /**
  * ニコ生ウェブソケットサーバーと通信するオブジェクト\
  * 再接続(reconnect)するたびに内部状態が更新され新しい値を返すようになります
@@ -154,11 +238,6 @@ export interface NicoliveWsServerConnector extends INicoliveServerConnector {
    * ニコ生のウェブソケットと通信するデータを取得します
    */
   getWsData(): NicoliveWsData;
-  /**
-   * メッセージサーバーと接続します
-   * @returns メッセージサーバーと通信しているオブジェクト
-   */
-  connectMessageServer(options?: NicoliveMessageConnectorOptions): Promise<NicoliveMessageServerConnector>;
 }
 /**
  * ニコ生メッセージサーバーと通信するオブジェクト\
@@ -214,58 +293,37 @@ export interface NicoliveMessageConnectorOptions {
    * 指定された場合はこのメタIDを持つメッセージまでスキップされます
    */
   readonly skipToMetaId?: string;
-}
-
-async function connectMessageServer(
-  entryUri: string,
-  options?: NicoliveMessageConnectorOptions,
-): Promise<NicoliveMessageServerConnector> {
-  let connectSet = await createConnectSet(options);
-
-  return {
-    isClosed: () => connectSet.messageFetcher.isClosed(),
-    getAbortController: () => connectSet.abortController,
-    reconnect: async () => {
-      if (!connectSet.messageFetcher.isClosed()) return;
-      connectSet = await createConnectSet({
-        at: connectSet.entryFetcher.getLastEntryAt(),
-        skipToMetaId: connectSet.messageFetcher.getLastMeta()?.id,
-      });
-    },
-    getIterator: () => connectSet.messageFetcher.iterator,
-    getBackwardMessages: (delayMs, maxSegmentCount, isSnapshot) =>
-      connectSet.entryFetcher.getBackwardMessages(delayMs, maxSegmentCount, isSnapshot),
+  /**
+   * 指定された場合は次に取得する過去メッセージがこのURIからになります
+   */
+  readonly backwardUri?: {
+    readonly segment: string | undefined;
+    readonly snapshot: string | undefined;
   };
-
-  async function createConnectSet(options: NicoliveMessageConnectorOptions | undefined) {
-    const entryAt = options?.at ?? "now";
-    const abortController = new AbortController();
-    const entryFetcher = await createEntryFetcher(abortController, entryUri, entryAt);
-    const messageFetcher = await createServerMessageFetcher(abortController, entryFetcher, options?.skipToMetaId);
-
-    return {
-      abortController,
-      entryFetcher,
-      messageFetcher,
-    };
-  }
 }
 
 interface IFetcher<T> {
+  /** フェッチが終了したら履行されます */
   readonly promise: Promise<void>;
   readonly iterator: AsyncIterableIterator<T>;
   isClosed(): boolean;
-  close(): void;
+  /** AbortError を出さずに終了する */
+  safeClose(): void;
 }
 interface EntryFetcher extends IFetcher<dwango.MessageSegment> {
+  readonly backwardSegment: dwango.BackwardSegment;
   getLastEntryAt(): NicoliveEntryAt;
-  readonly getBackwardMessages: NicoliveMessageServerConnector["getBackwardMessages"];
 }
 interface ServerMessageFetcher extends IFetcher<dwango.ChunkedMessage> {
   /**
    * 最後に取得した`dwango.ChunkedMessage_Meta`を取得します
    */
   getLastMeta(): dwango.ChunkedMessage_Meta | undefined;
+  readonly getBackwardMessages: NicoliveMessageServerConnector["getBackwardMessages"];
+  /**
+   * 次に取得する過去メッセージのURIを取得します
+   */
+  getBackwardUri(): { segment: string | undefined; snapshot: string | undefined; };
 }
 
 /**
@@ -288,23 +346,19 @@ async function createEntryFetcher(
 
   const innerAbort = new AbortController();
   const innerSignal = innerAbort.signal;
-  signal.addEventListener("abort", innerAborter);
+  signal.addEventListener("abort", safeClose);
 
   let lastEntryAt: NicoliveEntryAt = entryAt;
   let curretnEntryAt: NicoliveEntryAt | undefined = lastEntryAt;
   let closed = false;
-  let backwardSegmentUri: string | undefined;
-  let backwardSnapshotUri: string | undefined;
-  let fetchingBackwardSegment = false;
+  const backwardPromiser = promiser<dwango.BackwardSegment>();
 
-  const firstPromiser = promiser();
   const promise = (async () => {
     let receivedSegment = false;
     try {
       let fetchEntry = await NicoliveMessageServer.fetchEntry(entryUri, curretnEntryAt, innerSignal);
-      firstPromiser.resolve();
 
-      while (curretnEntryAt != null) {
+      while (true) {
         curretnEntryAt = undefined;
 
         for await (const { entry: { value, case: _case } } of fetchEntry.iterator) {
@@ -316,8 +370,7 @@ async function createEntryFetcher(
             iteratorSet.enqueue(value);
           } else if (!receivedSegment) {
             if (_case === "backward") {
-              backwardSegmentUri ??= value.segment?.uri;
-              backwardSnapshotUri ??= value.snapshot?.uri;
+              backwardPromiser.resolve(value);
             } else if (_case === "previous") {
               iteratorSet.enqueue(value);
             }
@@ -328,60 +381,26 @@ async function createEntryFetcher(
         fetchEntry = await NicoliveMessageServer.fetchEntry(entryUri, curretnEntryAt, innerSignal);
       }
     } catch (e) {
-      firstPromiser.reject(e);
-      iteratorSet.throw(e);
+      backwardPromiser.reject(e);
+      if (!signal.aborted && !isAbortError(e, innerSignal)) iteratorSet.throw(e);
     } finally {
       closed = true;
-      signal.removeEventListener("abort", innerAborter);
+      signal.removeEventListener("abort", safeClose);
       iteratorSet.close();
     }
   })();
-
-  await firstPromiser.promise;
 
   return {
     promise,
     iterator: iteratorSet.iterator,
     isClosed: () => closed,
-    close: innerAborter,
+    safeClose,
     getLastEntryAt: () => lastEntryAt,
-    getBackwardMessages,
+    backwardSegment: await backwardPromiser.promise,
   };
 
-  function getBackwardMessages(
-    delayMs: number,
-    maxSegmentCount: number,
-    isSnapshot = false,
-  ): ReturnType<EntryFetcher["getBackwardMessages"]> {
-    if (fetchingBackwardSegment) return undefined;
-    const backwardUri = isSnapshot ? backwardSnapshotUri : backwardSegmentUri;
-    if (backwardUri == null) return;
-    fetchingBackwardSegment = true;
-
-    const abortController = new AbortController();
-    const messagePromise = (async () => {
-      const backwards = await NicoliveMessageServer.fetchBackwardMessages(
-        backwardUri,
-        delayMs,
-        maxSegmentCount,
-        isSnapshot,
-        abortController.signal,
-      );
-
-      backwardSegmentUri = backwards.segmentUri;
-      backwardSnapshotUri = backwards.snapshotUri;
-      return [backwards.messages, backwards.segmentUri != null] as const;
-    })();
-
-    fetchingBackwardSegment = false;
-
-    return {
-      abortController,
-      messagePromise,
-    };
-  }
-
-  function innerAborter() {
+  function safeClose() {
+    closed = true;
     innerAbort.abort();
   }
 }
@@ -391,6 +410,7 @@ async function createEntryFetcher(
  * `entryFetcher.iterator`が続く限りセグメントメッセージをフェッチし続けます
  * @param abortController AbortController
  * @param entryFetcher EntryFetcher
+ * @param backwardSegment 次に取得する過去メッセージのURI
  * @param skipToMetaId 指定された場合はその次のメッセージからイテレーターで取得できます
  * @returns 最初のメッセージを取得したら値を返します
  */
@@ -398,6 +418,7 @@ async function createServerMessageFetcher(
   abortController: AbortController,
   entryFetcher: EntryFetcher,
   skipToMetaId: string | undefined,
+  backwardUri: { segment: string | undefined, snapshot: string | undefined; },
 ): Promise<ServerMessageFetcher> {
   const signal = abortController.signal;
   const iteratorSet = AsyncIteratorSet.create<dwango.ChunkedMessage>({
@@ -412,9 +433,11 @@ async function createServerMessageFetcher(
 
   const innerAbort = new AbortController();
   const innerSignal = innerAbort.signal;
-  signal.addEventListener("abort", innerAborter);
+  signal.addEventListener("abort", safeClose);
 
   let closed = false;
+  let currentBackwardUri = backwardUri;
+  let fetchingBackwardSegment = false;
   let lastMeta: dwango.ChunkedMessage_Meta | undefined;
 
   const firstPromiser = promiser();
@@ -428,7 +451,7 @@ async function createServerMessageFetcher(
         iteratorSet.enqueue(message);
         if (checkCloseMessage(message)) return;
       }
-      // ここまで firstPromiser.resolve を呼ぶためのコード分け
+      // ここまで firstPromiser.resolve を呼ぶためのコードわけ
 
       for await (const segment of entryFetcher.iterator) {
         const { iterator } = await NicoliveMessageServer.fetchMessage(segment.uri, innerSignal);
@@ -439,11 +462,11 @@ async function createServerMessageFetcher(
       }
     } catch (e) {
       firstPromiser.reject(e);
-      iteratorSet.throw(e);
+      if (!signal.aborted && !isAbortError(e, innerSignal)) iteratorSet.throw(e);
     } finally {
       closed = true;
-      entryFetcher.close();
-      signal.removeEventListener("abort", innerAborter);
+      entryFetcher.safeClose();
+      signal.removeEventListener("abort", safeClose);
       iteratorSet.close();
     }
   })();
@@ -454,17 +477,56 @@ async function createServerMessageFetcher(
     promise,
     iterator: iteratorSet.iterator,
     isClosed: () => closed,
-    close: innerAborter,
+    safeClose,
     getLastMeta: () => lastMeta,
+    getBackwardMessages,
+    getBackwardUri: () => currentBackwardUri,
   };
-
 
   function metaFilter(message: dwango.ChunkedMessage) {
     if (message.meta != null) lastMeta = message.meta;
     return true;
   }
 
-  function innerAborter() {
+  function safeClose() {
+    closed = true;
     innerAbort.abort();
+  }
+
+  function getBackwardMessages(
+    delayMs: number,
+    maxSegmentCount: number,
+    isSnapshot = false,
+  ): ReturnType<ServerMessageFetcher["getBackwardMessages"]> {
+    if (fetchingBackwardSegment) return undefined;
+    const backwardUri = isSnapshot ? currentBackwardUri.snapshot : currentBackwardUri.segment;
+    if (backwardUri == null) return;
+    fetchingBackwardSegment = true;
+
+    const abortController = new AbortController();
+    const messagePromise = (async () => {
+      const backward = await NicoliveMessageServer.fetchBackwardMessages(
+        backwardUri,
+        delayMs,
+        maxSegmentCount,
+        isSnapshot,
+        abortController.signal,
+      );
+      currentBackwardUri = { segment: backward.segmentUri, snapshot: backward.snapshotUri };
+
+      if (checkCloseMessage(backward.messages.at(-1))) {
+        safeClose();
+      }
+
+      const hasNext = currentBackwardUri.segment != null;
+      return [backward.messages, hasNext] as const;
+    })();
+
+    fetchingBackwardSegment = false;
+
+    return {
+      abortController,
+      messagePromise,
+    };
   }
 };
