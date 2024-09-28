@@ -1,18 +1,18 @@
 type Listener<A extends readonly unknown[] = [], R extends boolean | void = void> = (...arg: A) => R;
 
 /**
- * 1種類のイベントへのイベントハンドラーを管理する
+ * 1種類のイベントへのイベントハンドラーを管理します
  * @template Args イベントハンドラの引数型
  */
 export interface IEventTrigger<Args extends readonly unknown[]> {
   /**
-   * イベントリスナーを登録する
+   * イベントリスナーを登録します
    * @param listener イベントリスナー
    */
   on(listener: Listener<Args>): this;
 
   /**
-   * `true` を返すと自身を取り除くイベントリスナーを登録する
+   * `true` を返すと自身を取り除くイベントリスナーを登録します
    * @param event イベント名
    * @param listener イベントリスナー
    */
@@ -25,13 +25,13 @@ export interface IEventTrigger<Args extends readonly unknown[]> {
   off(listener: Listener<Args>): this;
 
   /**
-   * イベントリスナーを一度だけ実行するように登録する
+   * イベントリスナーを一度だけ実行するように登録します
    * @param listener イベントリスナー
    */
   once(listener: Listener<Args>): this;
 
   /**
-   * イベントを実行する
+   * イベントを実行します
    * @param args 引数
    * @returns １つでもイベントを実行したか
    */

@@ -15,19 +15,51 @@ export type NicoliveWsSendMessage =
   | NicoliveWsSendGetStreamQualities;
 
 /**
- * 視聴開始時に必要な情報を求めるメッセージ\
- * 成功の場合はストリームやメッセージサーバー情報など複数メッセージが順番で返されます\
- * 失敗の場合はエラーメッセージが返されます
+ * メッセージを生成するための関数群
  */
+export const NicoliveWsSendMessage = {
+  startWatching: (data: NicoliveWsSendStartWatching["data"]): NicoliveWsSendStartWatching => ({
+    type: "startWatching",
+    data,
+  }),
+  keepSeat: (): NicoliveWsSendKeepSeat => ({ type: "keepSeat" }),
+  getAkashic: (data: NicoliveWsSendGetAkashic["data"]): NicoliveWsSendGetAkashic => ({
+    type: "getAkashic",
+    data,
+  }),
+  changeStream: (data: NicoliveWsSendChangeStream["data"]): NicoliveWsSendChangeStream => ({
+    type: "changeStream",
+    data,
+  }),
+  answerEnquete: (data: NicoliveWsSendAnswerEnquete["data"]): NicoliveWsSendAnswerEnquete => ({
+    type: "answerEnquete",
+    data,
+  }),
+  pong: (): NicoliveWsSendPong => ({ type: "pong" }),
+  postComment: (data: NicoliveWsSendPostComment["data"]): NicoliveWsSendPostComment => ({
+    type: "postComment",
+    data,
+  }),
+  getTaxonomy: (): NicoliveWsSendGetTaxonomy => ({ type: "getTaxonomy" }),
+  getStreamQualities: (): NicoliveWsSendGetStreamQualities => ({
+    type: "getStreamQualities"
+  }),
+} as const;
+
+/**
+* 視聴開始時に必要な情報を求めるメッセージ\
+* 成功の場合はストリームやメッセージサーバー情報など複数メッセージが順番で返されます\
+* 失敗の場合はエラーメッセージが返されます
+*/
 export interface NicoliveWsSendStartWatching {
   type: "startWatching";
   data: {
-    /** 映像が必要な時のみ指定する必要がある */
+    /** 映像が必要な時のみ指定する必要があります */
     stream?: NicoliveStream;
     /**
      * 座席再利用するか
      * * 未指定時は `false`
-     * * `true`の場合は前回取得したストリームを再利用する
+     * * `true`の場合は前回取得したストリームを再利用します
      */
     reconnect?: boolean;
   };
@@ -35,7 +67,7 @@ export interface NicoliveWsSendStartWatching {
 
 /**
  * 座席を維持するためのハートビートメッセージ\
- * WebSocketを維持するためには定期的に送る必要がある
+ * WebSocketを維持するためには定期的に送る必要があります
  */
 export interface NicoliveWsSendKeepSeat {
   type: "keepSeat";
@@ -166,7 +198,7 @@ export type NicoliveWsReceiveMessage =
 export interface NicoliveWsReceiveMessageServer {
   type: "messageServer";
   data: {
-    /** メッセージサーバの接続先 URI */
+    /** メッセージサーバ接続先 */
     viewUri: string;
     /** vpos を計算する基準 (vpos = 0) となる ISO8601 形式の時刻 */
     vposBaseTime: string;
@@ -198,21 +230,21 @@ export interface NicoliveWsReceiveSeat {
 export interface NicoliveWsReceiveAkashic {
   type: "akashic";
   /**
-   * `status`以外の値は`status:"ready"`の場合のみ存在する\
+   * `status`以外の値は`status:"ready"`の場合のみ存在します\
    * それ以外の場合には`null`
    */
   data: {
     /** Akashicのプレーの状態 */
     status: NicoliveAkashicStatus;
-    /** AkashicプレーのID. `status:"ready"`のとき値がある */
+    /** AkashicプレーのID. `status:"ready"`の時に値が存在します */
     playId?: number;
-    /** プレートークン. `status:"ready"`のとき値がある */
+    /** プレートークン. `status:"ready"`の時に値が存在します */
     token?: string;
-    /** AGV に渡すプレーヤー ID. `status:"ready"`のとき値がある */
+    /** AGV に渡すプレーヤー ID. `status:"ready"`の時に値が存在します */
     playerId?: number;
-    /** AGV に渡す contentUrl (エンジン設定ファイルを取得できる). `status:"ready"`のとき値がある */
+    /** AGV に渡す contentUrl (エンジン設定ファイルを取得できる). `status:"ready"`の時に値が存在します */
     contentUrl?: string;
-    /** 接続先となるプレーログサーバー. `status:"ready"`のとき値がある */
+    /** 接続先となるプレーログサーバー. `status:"ready"`の時に値が存在します */
     logServerUrl?: string;
   };
 }
@@ -233,12 +265,12 @@ export interface NicoliveWsReceiveStream {
     syncUri: string;
     /**
      * ストリームの画質タイプ\
-     * 再生するストリームがないときに null が返される
+     * 再生するストリームがないときに null が返されます
      */
     quality?: NicoliveStreamQuality;
     /** 視聴可能なストリームの画質タイプの一覧を表す配列 */
     availableQualities: NicoliveStreamQuality[];
-    /** 視聴ストリームのプロトコル. `"hls"`が返される */
+    /** 視聴ストリームのプロトコル. `"hls"`が返されます */
     protocol: "hls";
   };
 }
@@ -443,7 +475,7 @@ export interface NicoliveStream {
   /**
    * 追っかけ再生用のストリームを取得するかどうか
    * * 未指定時は `false`
-   * * タイムシフトの場合は無視される
+   * * タイムシフトの場合は無視されます
    * * 追っかけ再生が無効な番組で true だとエラーになる
    */
   chasePlay?: boolean;
@@ -604,13 +636,13 @@ export interface NicoliveTag {
   text: string;
   /** ロックされているか (`true`ならカテゴリ?) */
   locked: false;
-  /** 大百科リンク. 記事がない場合は省略される */
+  /** 大百科リンク. 記事がない場合は省略されます */
   nicopediaArticleUrl?: string;
 }
 
 export interface NicoliveCategory {
   /** カテゴリの文字列 */
   text: string;
-  /** 大百科リンク. 記事がない場合は省略される */
+  /** 大百科リンク. 記事がない場合は省略されます */
   nicopediaArticleUrl?: string;
 }

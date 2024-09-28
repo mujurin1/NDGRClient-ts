@@ -4,24 +4,64 @@ export function timestampToMs(timestamp: Timestamp) {
   return Number(timestamp.seconds) * 1e3 + timestamp.nanos / 1e6;
 }
 
+export function throwIsNull<T>(value: T | undefined, errorMessage?: string): T {
+  if (value == null) throw new Error(errorMessage);
+  return value;
+}
+
+export function isAbortError(error: unknown, signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true && error instanceof Error && error.name === "AbortError";
+}
+
+export function createAbortError() {
+  return new DOMException("操作が中止されました", "AbortError");
+}
+
 /**
- * `until - preSec`まで待機する
+ * 指定時間後に履行するプロミスを返す\
+ * 渡された`signal`がabortすると`AbortError`が発生します
+ * @param ms 待機するミリ秒
+ * @param signal AbortSignal
+ * @returns 
  */
-export async function sleepUntil(until: Timestamp, preSec: number = 0) {
-  const time = timestampToMs(until) - preSec * 1e3;
-  const now = Date.now();
-  const ms = time - now;
+export async function sleep(ms: number, signal?: AbortSignal) {
+  const { promise, resolve, reject } = promiser<void>();
+  const id = setTimeout(timeouted, ms);
+  signal?.addEventListener("abort", aborted);
+  return promise;
 
-  await sleep(ms);
+  function timeouted() {
+    signal?.removeEventListener("abort", aborted);
+    resolve();
+  }
+
+  function aborted() {
+    clearInterval(id);
+    signal!.removeEventListener("abort", aborted);
+    reject(createAbortError());
+  }
 }
 
-export async function sleep(ms: number) {
-  if (ms <= 0) return;
-  return new Promise(res => setTimeout(res, ms));
+type ResolveType<T> = [T] extends [void] ? () => void : (value: T) => void;
+export function promiser<T = void>() {
+  let resolve: ResolveType<T> = null!;
+  let reject: (reason?: any) => void = null!;
+  const promise = new Promise<T>(((res, rej) => [resolve, reject] = [res as ResolveType<T>, rej]));
+  return { promise, resolve, reject };
 }
 
-export function promiser<T>(): [Promise<T>, (value: T) => void] {
-  let resolver: (value: T) => void = null!;
-  const promise = new Promise<T>((resolve => resolver = resolve));
-  return [promise, resolver] as const;
+/**
+ * オブジェクトの階層を辿って値を取得します\
+ * プロパティの途中や最終的な値が`undefined`/`null`の場合に例外を投げます
+ * @param object 取り出すオブジェクト
+ * @param props 辿る階層の名前
+ * @returns 
+ * @throws 値が`undefined`/`null`だった場合
+ */
+export function getProps(object: any, ...props: string[]): any {
+  for (const prop of props) {
+    if (object == null) break;
+    object = object[prop];
+  }
+  return throwIsNull(object, `値が存在しません: ${props.join(".")}`);
 }

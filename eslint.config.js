@@ -39,6 +39,8 @@ const defaultConfig = tsEslint.config({
     "prefer-const": "warn",
     "camelcase": "off",
 
+    "require-yield": "warn",
+    "@typescript-eslint/no-unnecessary-type-parameters": "warn",
     "@typescript-eslint/no-extraneous-class": "off",
     "@typescript-eslint/switch-exhaustiveness-check": "warn",
     "@typescript-eslint/no-unnecessary-type-arguments": "off",
@@ -52,6 +54,7 @@ const defaultConfig = tsEslint.config({
     "@typescript-eslint/no-unsafe-unary-minus": "error",
     "@typescript-eslint/no-empty-function": "off",
     "@typescript-eslint/no-empty-interface": "off",
+    "@typescript-eslint/no-empty-object-type": "off",
     "@typescript-eslint/no-useless-constructor": "off",
     "@typescript-eslint/no-inferrable-types": "off",
     "@typescript-eslint/no-misused-promises": "off",

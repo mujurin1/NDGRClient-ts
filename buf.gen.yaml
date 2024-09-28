@@ -3,6 +3,6 @@ inputs:
   - directory: proto
 plugins:
   - local: protoc-gen-es
-    out: src/gen
+    out: src/_protobuf
     opt:
      - target=ts

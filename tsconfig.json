@@ -13,7 +13,7 @@
     "declaration": true,
 
     "useDefineForClassFields": true,
-    "target": "esnext",
+    "target": "ES2023",
     "module": "esnext",
     "resolveJsonModule": true,
     "allowJs": true,
