@@ -85,6 +85,33 @@ export async function parseNicolivePageData(res: Response): Promise<NicolivePage
 }
 
 /**
+ * 有効な放送IDを含まない文字列だった
+ */
+export class NicoliveLiveIdError extends Error {
+  constructor(
+    public readonly liveIdOrUrl: string,
+  ) {
+    super(`有効な放送IDを含んでいません. ${liveIdOrUrl}`);
+    this.name = new.target.name;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+/**
+ * 放送ページの取得に失敗した
+ */
+export class NicolivePageNotFoundError extends Error {
+  constructor(
+    public readonly response: Response,
+    public readonly liveId: NicoliveId,
+  ) {
+    super(`放送ページが存在しません. lv:${liveId}`);
+    this.name = new.target.name;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+/**
  * 放送ページのデータの解析に失敗した
  */
 export class NicolivePageParseError extends Error {
@@ -105,7 +132,7 @@ export class NicoliveAccessDeniedError extends Error {
   constructor(
     public readonly pageData: NicolivePageData,
   ) {
-    super(`放送が非公開または視聴する権限がありません. LiveId:${pageData.nicoliveInfo.liveId}`);
+    super(`放送が非公開または視聴する権限がありません. lv:${pageData.nicoliveInfo.liveId}`);
     this.name = new.target.name;
     Object.setPrototypeOf(this, new.target.prototype);
   }

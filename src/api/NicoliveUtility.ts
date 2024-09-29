@@ -5,7 +5,7 @@ import { NicoliveMessageServer, type NicoliveEntryAt } from "./NicoliveMessageSe
 import { NicoliveWs, type MessageServerData, type NicoliveWsData } from "./NicoliveWs";
 import type { NicoliveCommentColor_Fixed, NicoliveStream, NicoliveWsReceiveMessage, NicoliveWsSendMessage, NicoliveWsSendPostComment } from "./NicoliveWsType";
 import type { NicoliveId, NicolivePageData } from "./type";
-import { checkCloseMessage, getNicoliveId, parseNicolivePageData } from "./utils";
+import { checkCloseMessage, NicoliveLiveIdError, NicolivePageNotFoundError, getNicoliveId as parseNicoliveId, parseNicolivePageData } from "./utils";
 
 /**
  * ニコ生と通信する適当な関数郡
@@ -64,12 +64,12 @@ export const NicoliveUtility = {
    * @param liveIdOrUrl 接続する放送ID. `lv*` `ch*` `user/*` を含む文字列
    * @returns ニコ生視聴ページのデータ
    */
-  fetchNicolivePageData: (liveIdOrUrl: string): AbortAndPromise<NicolivePageData | undefined> => {
+  fetchNicolivePageData: (liveIdOrUrl: string): AbortAndPromise<NicolivePageData> => {
     return AbortAndPromise.new(async abortController => {
-      const liveId = getNicoliveId(liveIdOrUrl);
-      if (liveId == null) return;
+      const liveId = parseNicoliveId(liveIdOrUrl);
+      if (liveId == null) throw new NicoliveLiveIdError(liveIdOrUrl);
       const res = await fetch(`https://live.nicovideo.jp/watch/${liveId}`, { signal: abortController.signal });
-      if (!res.ok) return undefined;
+      if (!res.ok) throw new NicolivePageNotFoundError(res, liveId);
       return await parseNicolivePageData(res);
     });
   },
