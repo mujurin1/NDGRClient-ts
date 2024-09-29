@@ -480,6 +480,10 @@ async function createMessageFetcher(
     filter: skipToMetaId == null
       ? metaFilter
       : value => {
+        // skipToMetaId が残ったまま次のEntryに進むということはそのエントリ内の最後のメッセージだったので
+        // 以降はフィルター不要ということ
+        if (fetchedFirstEntry) return [true, metaFilter];
+
         metaFilter(value);
         return value.meta?.id === skipToMetaId ? [false, metaFilter] : false;
       },
@@ -493,6 +497,7 @@ async function createMessageFetcher(
   let currentBackwardUri = backwardUri;
   let fetchingBackwardSegment = false;
   let lastMeta: dwango.ChunkedMessage_Meta | undefined;
+  let fetchedFirstEntry = false;
 
   const firstPromiser = promiser();
   const promise = (async () => {
@@ -505,7 +510,8 @@ async function createMessageFetcher(
         iteratorSet.enqueue(message);
         if (checkCloseMessage(message)) return;
       }
-      // ここまで firstPromiser.resolve を呼ぶためのコードわけ
+      // ここまで firstPromiser.resolve を呼ぶためのコード分け
+      fetchedFirstEntry = true;
 
       for await (const segment of entryFetcher.iterator) {
         const { iterator } = await NicoliveMessageServer.fetchMessage(segment.uri, innerSignal);
