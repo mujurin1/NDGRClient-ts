@@ -1,5 +1,5 @@
-import * as protobuf from "@bufbuild/protobuf";
 import { BinaryReader } from "@bufbuild/protobuf/wire";
+import { protobuf } from "../_protobuf";
 import { AsyncIteratorSet } from "./AsyncIteratorSet";
 import { promiser } from "./utils";
 
