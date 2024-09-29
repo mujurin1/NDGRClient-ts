@@ -42,6 +42,10 @@ export function createAbortError() {
  */
 export async function sleep(ms: number, signal?: AbortSignal) {
   const { promise, resolve, reject } = promiser<void>();
+  if (signal?.aborted) {
+    await sleep(0);
+    return Promise.reject(createAbortError());
+  }
   const id = setTimeout(timeouted, ms);
   signal?.addEventListener("abort", aborted);
   return promise;

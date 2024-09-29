@@ -1,8 +1,8 @@
-import { createAbortError, promiser } from "../lib/utils";
+import { createAbortError, promiser, sleep } from "../lib/utils";
 import { connectWsAndAsyncIterable } from "../lib/websocket";
 import { type NicoliveStream, type NicoliveWsReceiveMessage, NicoliveWsSendMessage, type NicoliveWsSendPostComment } from "./NicoliveWsType";
 import type { NicolivePageData } from "./type";
-import { NicoliveAccessDeniedError } from "./utils";
+import { NicoliveAccessDeniedError, NicoliveWebSocketDisconnectError, NicoliveWebSocketReconnectError } from "./utils";
 
 /**
  * `NicoliveWsReceiveMessageServer`をパースした情報
@@ -23,6 +23,22 @@ export interface MessageServerData {
   readonly hashedUserId?: string;
 }
 
+export interface WebSocketReconnectData {
+  /** 再接続時にはこのメッセージが来ないため必須 */
+  readonly messageServerData: MessageServerData;
+  /** ウェブソケットURL */
+  readonly websocketUrl: string;
+  /** 最新の放送の開始/終了時刻 */
+  readonly latestSchedule: {
+    /** 開始時刻 UNIX TIME (ミリ秒単位) */
+    readonly begin: Date;
+    /** 終了時刻 UNIX TIME (ミリ秒単位) */
+    readonly end: Date;
+  };
+  /** 再接続する時刻を表すミリ秒 (この時刻までは再接続をしない) */
+  readonly reconnectTime: number | undefined;
+}
+
 /**
  * ニコ生のウェブソケットと通信するための関数郡
  */
@@ -39,15 +55,20 @@ export const NicoliveWs = {
   connectWaitOpened: async (
     pageData: NicolivePageData,
     signal: AbortSignal,
-    reconnectData?: MessageServerData,
+    reconnectData?: WebSocketReconnectData,
     nicolveStream?: NicoliveStream,
   ): Promise<NicoliveWsData> => {
-    const websocketUrl = pageData.websocketUrl;
     const reconnect = reconnectData != null;
+    let websocketUrl = reconnectData?.websocketUrl ?? pageData.websocketUrl;
     if (websocketUrl === "")
       throw new NicoliveAccessDeniedError(pageData);
 
-    let latestSchedule: ReturnType<NicoliveWsData["getLatestSchedule"]> = {
+    if (reconnect && reconnectData.reconnectTime != null) {
+      const waitTimeMs = reconnectData.reconnectTime - Date.now();
+      await sleep(waitTimeMs, signal);
+    }
+
+    let latestSchedule: ReturnType<NicoliveWsData["getLatestSchedule"]> = reconnectData?.latestSchedule ?? {
       begin: new Date(pageData.beginTime * 1e3),
       end: new Date(pageData.endTime * 1e3),
     };
@@ -56,19 +77,20 @@ export const NicoliveWs = {
     const [ws, iteratorSet] = await connectWsAndAsyncIterable<string, NicoliveWsReceiveMessage>(
       websocketUrl,
       onMessage,
-      () => signal.removeEventListener("abort", aborted),
+      onClose,
     );
     sendStartWatching(ws, reconnect, nicolveStream);
 
     const messageServerDataPromiser = reconnect ? undefined : promiser<MessageServerData>();
     const messageServerDataPromise = messageServerDataPromiser == null
-      ? Promise.resolve<MessageServerData>(reconnectData!)
+      ? Promise.resolve(reconnectData!.messageServerData)
       : messageServerDataPromiser.promise;
 
     return {
       ws,
       iterator: iteratorSet.iterator,
       messageServerDataPromise,
+      getWebsocketUrl: () => websocketUrl,
       getLatestSchedule: () => latestSchedule,
       send: (message: NicoliveWsSendMessage) => send(ws, message),
       postComment: async (text, isAnonymous, options) => {
@@ -99,14 +121,28 @@ export const NicoliveWs = {
           vposBaseTime: new Date(vposBaseTime).getTime(),
           hashedUserId,
         });
+      } else if (message.type === "reconnect") {
+        websocketUrl = replaceAudienceToken(websocketUrl, message.data.audienceToken);
+        iteratorSet.throw(new NicoliveWebSocketReconnectError(message.data));
+        ws.close();
+      } else if (message.type === "disconnect") {
+        iteratorSet.throw(new NicoliveWebSocketDisconnectError(message.data.reason));
       }
+
+      iteratorSet.enqueue(message);
       return message;
+    }
+
+    function onClose() {
+      signal.removeEventListener("abort", aborted);
+      ws.close();
+      iteratorSet.close();
     }
 
     function aborted() {
       messageServerDataPromiser?.reject(createAbortError());
       iteratorSet.throw(createAbortError());
-      ws?.close();
+      onClose();
     }
   },
   postComment: (
@@ -142,6 +178,11 @@ export interface NicoliveWsData {
    */
   readonly messageServerDataPromise: Promise<MessageServerData>;
   /**
+   * ウェブソケットURLを取得します\
+   * 再接続要求を受け取った時に新しいURLになるためこれが必要です
+   */
+  getWebsocketUrl(): string;
+  /**
    * 最新の放送の開始/終了時刻を取得します
    */
   getLatestSchedule(): {
@@ -164,6 +205,7 @@ export interface NicoliveWsData {
   ): Promise<void>;
 }
 
+
 function parseMessage(data: string): NicoliveWsReceiveMessage {
   return JSON.parse(data) as NicoliveWsReceiveMessage;
 }
@@ -179,6 +221,13 @@ function sendStartWatching(ws: WebSocket, reconnect?: boolean | undefined, strea
 function sendKeepSeatAndPong(ws: WebSocket) {
   send(ws, NicoliveWsSendMessage.pong());
   send(ws, NicoliveWsSendMessage.keepSeat());
+}
+
+function replaceAudienceToken(websocketUrl: string, audieceToken: string): string {
+  const parsedUrl = new URL(websocketUrl);
+  const searchParams = parsedUrl.searchParams;
+  searchParams.set("audience_token", audieceToken);
+  return parsedUrl.toString();
 }
 
 

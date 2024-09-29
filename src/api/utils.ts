@@ -1,7 +1,7 @@
 import { dwango } from "../_protobuf";
 import { getProps } from "../lib/utils";
 import { NicoliveUtility } from "./NicoliveUtility";
-import type { NicoliveCommentColor_Fixed } from "./NicoliveWsType";
+import { NicoliveDisconectReasonDescription, type NicoliveCommentColor_Fixed, type NicoliveDisconectReason, type NicoliveWsReceiveReconnect } from "./NicoliveWsType";
 import type { NicoliveId, NicoliveInfo, NicolivePageData, NicoliveUserData } from "./type";
 
 export function getNicoliveId(liveIdOrUrl: string): NicoliveId | undefined {
@@ -137,6 +137,36 @@ export class NicoliveAccessDeniedError extends Error {
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
+
+/**
+ * ウェブソケットが再接続要求を受け取った
+ */
+export class NicoliveWebSocketReconnectError extends Error {
+  /** 再接続する時刻を表すミリ秒 */
+  public readonly reconnectTime: number;
+  constructor(
+    public readonly data: NicoliveWsReceiveReconnect["data"],
+  ) {
+    super(`ウェブソケット再接続要求を受け取りました`);
+    this.reconnectTime = Date.now() + this.data.waitTimeSec * 1e3;
+    this.name = new.target.name;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+/**
+ * ウェブソケットを切断された
+ */
+export class NicoliveWebSocketDisconnectError extends Error {
+  constructor(
+    public readonly reason: NicoliveDisconectReason,
+  ) {
+    super(`ウェブソケットから切断されました. 理由:${NicoliveDisconectReasonDescription[reason]}`);
+    this.name = new.target.name;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 
 function parseProvider(embedded: any): NicoliveInfo["provider"] {
   const program = getProps(embedded, "program");

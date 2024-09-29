@@ -2,7 +2,7 @@ import type { dwango } from "../_protobuf";
 import { AsyncIteratorSet } from "../lib/AsyncIteratorSet";
 import { isAbortError, promiser } from "../lib/utils";
 import { NicoliveMessageServer, type NicoliveEntryAt } from "./NicoliveMessageServer";
-import { NicoliveWs, type MessageServerData, type NicoliveWsData } from "./NicoliveWs";
+import { NicoliveWs, type MessageServerData, type NicoliveWsData, type WebSocketReconnectData } from "./NicoliveWs";
 import type { NicoliveCommentColor_Fixed, NicoliveStream, NicoliveWsReceiveMessage, NicoliveWsSendMessage, NicoliveWsSendPostComment } from "./NicoliveWsType";
 import type { NicoliveId, NicolivePageData } from "./type";
 import { checkCloseMessage, NicoliveLiveIdError, NicolivePageNotFoundError, getNicoliveId as parseNicoliveId, parseNicolivePageData } from "./utils";
@@ -91,9 +91,14 @@ export const NicoliveUtility = {
         getPromise: () => connectSet.promise,
         isClosed: () => connectSet.isClosed(),
         getAbortController: () => connectSet.abortController,
-        reconnect: abortController => AbortAndPromise.newA(abortController, async abortController => {
+        reconnect: (abortController, reconnectTime) => AbortAndPromise.newA(abortController, async abortController => {
           if (!connectSet.isClosed()) return;
-          const reconnectData = await connectSet.wsData.messageServerDataPromise;
+          const reconnectData: WebSocketReconnectData = {
+            messageServerData: await connectSet.wsData.messageServerDataPromise,
+            latestSchedule: connectSet.wsData.getLatestSchedule(),
+            websocketUrl: connectSet.wsData.getWebsocketUrl(),
+            reconnectTime,
+          };
           connectSet = await createConnectSet(abortController, reconnectData);
         }),
         getIterator: () => connectSet.wsData.iterator,
@@ -105,7 +110,7 @@ export const NicoliveUtility = {
       };
     });
 
-    async function createConnectSet(abortController: AbortController, reconnectData: MessageServerData | undefined) {
+    async function createConnectSet(abortController: AbortController, reconnectData: WebSocketReconnectData | undefined) {
       const wsData = await NicoliveWs.connectWaitOpened(pageData, abortController.signal, reconnectData, options?.streamMessage);
       const { promise, resolve } = promiser();
       wsData.ws.addEventListener("close", onClose);
@@ -232,8 +237,19 @@ export interface INicoliveServerConnector {
 /**
  * ニコ生ウェブソケットサーバーと通信するオブジェクト\
  * 再接続(reconnect)するたびに内部状態が更新され新しい値を返すようになります
+ * 
+ * ウェブソケットは再接続要求を送ってくる場合があります\
+ * その場合はイテレーターに`NicoliveWebSocketReconnectError`が送られます\
+ * その後再接続する場合は`reconnectTime`を渡して再接続してください
  */
 export interface NicoliveWsServerConnector extends INicoliveServerConnector {
+  /**
+   * 再接続します\
+   * `NicoliveWebSocketReconnectError`により再接続する場合は `reconnectTime` を指定してください
+   * @param abortController 生成されるコネクターのAbortControllerとして利用されます
+   * @param reconnectTime 再接続する時刻を表すミリ秒 (この時刻までは再接続をしない)
+   */
+  reconnect(abortController?: AbortController, reconnectTime?: number): AbortAndPromise<void>;
   /**
    * ニコ生メッセージサーバーからのメッセージを取り出すイテレーターを取得します\
    * 取り出された全てのイテレーターは状態を共有しています
