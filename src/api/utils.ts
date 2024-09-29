@@ -27,20 +27,6 @@ export async function* flattenAsycnIterable<T>(iters: AsyncGenerator<AsyncIterab
 }
 
 /**
- * 放送ページのデータの解析に失敗した
- */
-export class NicolivePageParseError extends Error {
-  constructor(
-    public readonly url: string,
-    public readonly innerError: unknown,
-  ) {
-    super(`放送ページの解析に失敗しました. url:${url}\n内部エラー:${innerError}`);
-    this.name = new.target.name;
-    Object.setPrototypeOf(this, new.target.prototype);
-  }
-}
-
-/**
  * ニコ生の視聴ページの情報を取得する
  * @param res ニコ生視聴ページをフェッチしたレスポンス
  * @returns ニコ生視聴ページの情報
@@ -95,6 +81,33 @@ export async function parseNicolivePageData(res: Response): Promise<NicolivePage
     }
   } catch (e) {
     throw new NicolivePageParseError(res.url, e);
+  }
+}
+
+/**
+ * 放送ページのデータの解析に失敗した
+ */
+export class NicolivePageParseError extends Error {
+  constructor(
+    public readonly url: string,
+    public readonly innerError: unknown,
+  ) {
+    super(`放送ページの解析に失敗しました. url:${url}\n内部エラー:${innerError}`);
+    this.name = new.target.name;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+/**
+ * 放送を視聴する権限がない
+ */
+export class NicoliveAccessDeniedError extends Error {
+  constructor(
+    public readonly pageData: NicolivePageData,
+  ) {
+    super(`放送が非公開または視聴する権限がありません. LiveId:${pageData.nicoliveInfo.liveId}`);
+    this.name = new.target.name;
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 

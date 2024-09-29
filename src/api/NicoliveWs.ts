@@ -2,6 +2,7 @@ import { createAbortError, promiser } from "../lib/utils";
 import { connectWsAndAsyncIterable } from "../lib/websocket";
 import { type NicoliveStream, type NicoliveWsReceiveMessage, NicoliveWsSendMessage, type NicoliveWsSendPostComment } from "./NicoliveWsType";
 import type { NicolivePageData } from "./type";
+import { NicoliveAccessDeniedError } from "./utils";
 
 /**
  * `NicoliveWsReceiveMessageServer`をパースした情報
@@ -41,15 +42,19 @@ export const NicoliveWs = {
     reconnectData?: MessageServerData,
     nicolveStream?: NicoliveStream,
   ): Promise<NicoliveWsData> => {
+    const websocketUrl = pageData.websocketUrl;
+    const reconnect = reconnectData != null;
+    if (websocketUrl === "")
+      throw new NicoliveAccessDeniedError(pageData);
+
     let latestSchedule: ReturnType<NicoliveWsData["getLatestSchedule"]> = {
       begin: new Date(pageData.beginTime * 1e3),
       end: new Date(pageData.endTime * 1e3),
     };
 
     signal.addEventListener("abort", aborted);
-    const reconnect = reconnectData != null;
     const [ws, iteratorSet] = await connectWsAndAsyncIterable<string, NicoliveWsReceiveMessage>(
-      pageData.websocketUrl,
+      websocketUrl,
       onMessage,
       () => signal.removeEventListener("abort", aborted),
     );

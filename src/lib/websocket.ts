@@ -40,9 +40,10 @@ export async function connectWsAndAsyncIterable<
 
   return [ws, iteratorSet];
 
-  function cleanupAndCloseIter() {
+  function cleanupAndCloseIter(event: CloseEvent) {
     ws.removeEventListener("message", onMessage);
     ws.removeEventListener("close", cleanupAndCloseIter);
+    openPromiser.reject(`code:${event.code}  reason:${event.reason}`);
     iteratorSet.close();
     closed?.();
   }
