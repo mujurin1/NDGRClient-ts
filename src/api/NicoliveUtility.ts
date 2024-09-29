@@ -280,7 +280,7 @@ export interface NicoliveWsServerConnector extends INicoliveServerConnector {
   /**
    * コメントを投稿します
    * @param text コメント本文
-   * @param isAnonymous 匿名か. 未指定時は`true`\
+   * @param isAnonymous 匿名か. 未指定時は`false`\
    * ({@link NicoliveWsSendPostComment.data} の`isAnonymous`相当)
    * @param options オプション
    */

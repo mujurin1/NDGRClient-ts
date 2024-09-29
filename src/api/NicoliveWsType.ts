@@ -130,7 +130,7 @@ export interface NicoliveWsSendPostComment {
      */
     vpos: number;
     /**
-     * 184で投稿する(`true`)か. 未指定時は`true`
+     * 184で投稿する(`true`)か. 未指定時は`false`
      */
     isAnonymous?: boolean;
     /**
