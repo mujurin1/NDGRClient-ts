@@ -1,6 +1,7 @@
 import { createAbortError, promiser } from "../lib/utils";
 import { connectWsAndAsyncIterable } from "../lib/websocket";
 import { type NicoliveStream, type NicoliveWsReceiveMessage, NicoliveWsSendMessage, type NicoliveWsSendPostComment } from "./NicoliveWsType";
+import type { NicolivePageData } from "./type";
 
 /**
  * `NicoliveWsReceiveMessageServer`をパースした情報
@@ -35,15 +36,20 @@ export const NicoliveWs = {
    * @returns ウェブソケット本体やメッセージを取得するストリームを含むオブジェクト
    */
   connectWaitOpened: async (
-    url: string,
+    pageData: NicolivePageData,
     signal: AbortSignal,
     reconnectData?: MessageServerData,
     nicolveStream?: NicoliveStream,
   ): Promise<NicoliveWsData> => {
-    const reconnect = reconnectData != null;
+    let latestSchedule: ReturnType<NicoliveWsData["getLatestSchedule"]> = {
+      begin: new Date(pageData.beginTime * 1e3),
+      end: new Date(pageData.endTime * 1e3),
+    };
+
     signal.addEventListener("abort", aborted);
+    const reconnect = reconnectData != null;
     const [ws, iteratorSet] = await connectWsAndAsyncIterable<string, NicoliveWsReceiveMessage>(
-      url,
+      pageData.websocketUrl,
       onMessage,
       () => signal.removeEventListener("abort", aborted),
     );
@@ -53,10 +59,12 @@ export const NicoliveWs = {
     const messageServerDataPromise = messageServerDataPromiser == null
       ? Promise.resolve<MessageServerData>(reconnectData!)
       : messageServerDataPromiser.promise;
+
     return {
       ws,
       iterator: iteratorSet.iterator,
       messageServerDataPromise,
+      getLatestSchedule: () => latestSchedule,
       send: (message: NicoliveWsSendMessage) => send(ws, message),
       postComment: async (text, isAnonymous, options) => {
         const data = await messageServerDataPromise;
@@ -74,6 +82,11 @@ export const NicoliveWs = {
       const message = parseMessage(data);
       if (message.type === "ping") {
         sendKeepSeatAndPong(ws);
+      } else if (message.type === "schedule") {
+        latestSchedule = {
+          begin: new Date(message.data.begin),
+          end: new Date(message.data.end),
+        };
       } else if (message.type === "messageServer") {
         const { viewUri, vposBaseTime, hashedUserId } = message.data;
         messageServerDataPromiser?.resolve({
@@ -95,7 +108,7 @@ export const NicoliveWs = {
     ws: WebSocket,
     vpos: number,
     text: string,
-    isAnonymous: boolean = false,
+    isAnonymous?: boolean,
     options?: Omit<NicoliveWsSendPostComment["data"], "text" | "isAnonymous">,
   ): void => {
     send(ws, NicoliveWsSendMessage.postComment({
@@ -111,15 +124,34 @@ export const NicoliveWs = {
  * ニコ生のウェブソケットと通信するデータ
  */
 export interface NicoliveWsData {
-  /** 接続しているウェブソケット */
+  /**
+   * 接続しているウェブソケット
+   */
   readonly ws: WebSocket;
-  /** メッセージを取り出すイテレーター */
+  /**
+   * メッセージを取り出すイテレーター
+   */
   readonly iterator: AsyncIterableIterator<NicoliveWsReceiveMessage>;
-  /** {@link NicoliveWsReceiveMessageServer} を返すプロミス */
+  /**
+   * {@link NicoliveWsReceiveMessageServer} を返すプロミス
+   */
   readonly messageServerDataPromise: Promise<MessageServerData>;
-  /** メッセージを送信します */
+  /**
+   * 最新の放送の開始/終了時刻を取得します
+   */
+  getLatestSchedule(): {
+    /** 開始時刻 UNIX TIME (ミリ秒単位) */
+    readonly begin: Date;
+    /** 終了時刻 UNIX TIME (ミリ秒単位) */
+    readonly end: Date;
+  };
+  /**
+   * メッセージを送信します
+   */
   send(message: NicoliveWsSendMessage): void;
-  /** コメントを投稿します */
+  /**
+   * コメントを投稿します
+   */
   postComment(
     text: string,
     isAnonymous?: boolean,

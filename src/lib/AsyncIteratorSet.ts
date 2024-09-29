@@ -20,7 +20,7 @@ export interface AsyncIteratorSet<T> {
 }
 
 type Filter<T> = (value: T) => (boolean | readonly [boolean, Filter<T> | undefined]);
-export interface AsyncIteratorSetOption<T> {
+export interface AsyncIteratorSetOptions<T> {
   /**
    * `enqueue`時に値を取り除くフィルター関数\
    * `true`の場合に値を保持します
@@ -39,15 +39,15 @@ export const AsyncIteratorSet = {
   /**
    * 外部から値をキューに追加出来る非同期イテレーター\
    * abortした後に読み出すと`AbortError`が発生します
-   * @param option AsyncIteratorSetOption
+   * @param options AsyncIteratorSetOptions
    */
-  create: <T>(option?: AsyncIteratorSetOption<T>): AsyncIteratorSet<T> => {
+  create: <T>(options?: AsyncIteratorSetOptions<T>): AsyncIteratorSet<T> => {
     let resolveNext: ((value: IteratorResult<T>) => void) | undefined;
     let rejectNext: ((e: Error) => void) | undefined;
     let state: STATE = "iterating";
     let error: Error;
     const queue: T[] = [];
-    let filter = option?.filter;
+    let filter = options?.filter;
 
     const iterable = {
       next(): Promise<IteratorResult<T>> {
@@ -61,7 +61,7 @@ export const AsyncIteratorSet = {
       },
       return() {
         // MEMO: close/abort した後は呼び出す必要は無い (はず)
-        if (state === "iterating") option?.breaked?.();
+        if (state === "iterating") options?.breaked?.();
         return Promise.resolve({ value: undefined as any, done: true });
       },
     };

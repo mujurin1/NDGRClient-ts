@@ -3,7 +3,7 @@ import { AsyncIteratorSet } from "../lib/AsyncIteratorSet";
 import { isAbortError, promiser } from "../lib/utils";
 import { NicoliveMessageServer, type NicoliveEntryAt } from "./NicoliveMessageServer";
 import { NicoliveWs, type MessageServerData, type NicoliveWsData } from "./NicoliveWs";
-import type { NicoliveCommentColor_Fixed, NicoliveStream, NicoliveWsReceiveMessage } from "./NicoliveWsType";
+import type { NicoliveCommentColor_Fixed, NicoliveStream, NicoliveWsReceiveMessage, NicoliveWsSendMessage, NicoliveWsSendPostComment } from "./NicoliveWsType";
 import type { NicoliveId, NicolivePageData } from "./type";
 import { checkCloseMessage, getNicoliveId, parseNicolivePageData } from "./utils";
 
@@ -77,7 +77,7 @@ export const NicoliveUtility = {
    * ニコ生ウェブソケットサーバーと通信するオブジェクトを生成します\
    * プロミスはウェブソケットが接続してから値を返します
    * @param pageData ニコ生視聴ページの情報
-   * @param options TODO:
+   * @param options NicoliveWsConnectorOptions
    * @returns ニコ生ウェブソケットサーバーと通信するオブジェクトを返すプロミス
    */
   createWsServerConnector: (
@@ -98,11 +98,15 @@ export const NicoliveUtility = {
         }),
         getIterator: () => connectSet.wsData.iterator,
         getWsData: () => connectSet.wsData,
+        getMessageServerData: () => connectSet.wsData.messageServerDataPromise,
+        getLatestSchedule: () => connectSet.wsData.getLatestSchedule(),
+        send: message => connectSet.wsData.send(message),
+        postComment: (text, isAnonymous, options) => connectSet.wsData.postComment(text, isAnonymous, options),
       };
     });
 
     async function createConnectSet(abortController: AbortController, reconnectData: MessageServerData | undefined) {
-      const wsData = await NicoliveWs.connectWaitOpened(pageData.websocketUrl, abortController.signal, reconnectData, options?.streamMessage);
+      const wsData = await NicoliveWs.connectWaitOpened(pageData, abortController.signal, reconnectData, options?.streamMessage);
       const { promise, resolve } = promiser();
       wsData.ws.addEventListener("close", onClose);
 
@@ -127,7 +131,7 @@ export const NicoliveUtility = {
    * ニコ生メッセージサーバーと通信するオブジェクトを生成します\
    * プロミスはメッセージ受信用のフェッチが成功してから値を返します
    * @param messageServerData `NicoliveWsReceiveMessageServer`
-   * @param options TODO:
+   * @param options NicoliveMessageConnectorOptions
    * @returns ニコ生メッセージサーバーと通信するオブジェクトを返すプロミス
    */
   createMessageServerConnector: (
@@ -168,7 +172,7 @@ export const NicoliveUtility = {
         segment: entryFetcher.backwardSegment.segment?.uri,
         snapshot: entryFetcher.backwardSegment.snapshot?.uri,
       };
-      const messageFetcher = await createServerMessageFetcher(abortController, entryFetcher, options?.skipToMetaId, backwardUri);
+      const messageFetcher = await createMessageFetcher(abortController, entryFetcher, options?.skipToMetaId, backwardUri);
 
       return {
         promise: (async () => { await entryFetcher.promise; await messageFetcher.promise; })(),
@@ -207,7 +211,8 @@ export const AbortAndPromise = {
  */
 export interface INicoliveServerConnector {
   /**
-   * 接続が終了したら履行されるプロミス
+   * 接続が終了したら履行されます\
+   * このプロミスは例外は発生させません
    */
   getPromise(): Promise<void>;
   /**
@@ -238,6 +243,36 @@ export interface NicoliveWsServerConnector extends INicoliveServerConnector {
    * ニコ生のウェブソケットと通信するデータを取得します
    */
   getWsData(): NicoliveWsData;
+  /**
+   * {@link NicoliveWsReceiveMessageServer} を取得します
+   */
+  getMessageServerData(): Promise<MessageServerData>;
+  /**
+   * 最新の放送の開始/終了時刻を取得します
+   */
+  getLatestSchedule(): {
+    /** 開始時刻 UNIX TIME (ミリ秒単位) */
+    readonly begin: Date;
+    /** 終了時刻 UNIX TIME (ミリ秒単位) */
+    readonly end: Date;
+  };
+  /**
+   * メッセージを送信します
+   * @param message 送信するメッセージ
+   */
+  send(message: NicoliveWsSendMessage): void;
+  /**
+   * コメントを投稿します
+   * @param text コメント本文
+   * @param isAnonymous 匿名か. 未指定時は`true`\
+   * ({@link NicoliveWsSendPostComment.data} の`isAnonymous`相当)
+   * @param options オプション
+   */
+  postComment(
+    text: string,
+    isAnonymous?: boolean,
+    options?: Omit<NicoliveWsSendPostComment["data"], "text" | "isAnonymous">,
+  ): Promise<void>;
 }
 /**
  * ニコ生メッセージサーバーと通信するオブジェクト\
@@ -248,7 +283,7 @@ export interface NicoliveMessageServerConnector extends INicoliveServerConnector
    * ニコ生メッセージサーバーからのメッセージを取り出すイテレーターを取得します\
    * 取り出された全てのイテレーターは状態を共有しています
    */
-  readonly getIterator: () => AsyncIterable<dwango.ChunkedMessage>;
+  getIterator(): AsyncIterable<dwango.ChunkedMessage>;
   /**
    * 過去メッセージを取得します\
    * 取得できる過去メッセージが無い場合は`undefined`を返します
@@ -257,11 +292,11 @@ export interface NicoliveMessageServerConnector extends INicoliveServerConnector
    * @param isSnapshot スナップショットを取るか @default false
    * @returns 
    */
-  readonly getBackwardMessages: (
+  getBackwardMessages(
     delayMs: number,
     maxSegmentCount: number,
     isSnapshot?: boolean,
-  ) => (
+  ): (
       | {
         /**
          * 過去メッセージの取得を中断する\
@@ -303,7 +338,10 @@ export interface NicoliveMessageConnectorOptions {
 }
 
 interface IFetcher<T> {
-  /** フェッチが終了したら履行されます */
+  /**
+   * フェッチが終了したら履行されます\
+   * このプロミスは例外は発生させません
+   */
   readonly promise: Promise<void>;
   readonly iterator: AsyncIterableIterator<T>;
   isClosed(): boolean;
@@ -314,7 +352,7 @@ interface EntryFetcher extends IFetcher<dwango.MessageSegment> {
   readonly backwardSegment: dwango.BackwardSegment;
   getLastEntryAt(): NicoliveEntryAt;
 }
-interface ServerMessageFetcher extends IFetcher<dwango.ChunkedMessage> {
+interface MessageFetcher extends IFetcher<dwango.ChunkedMessage> {
   /**
    * 最後に取得した`dwango.ChunkedMessage_Meta`を取得します
    */
@@ -414,12 +452,12 @@ async function createEntryFetcher(
  * @param skipToMetaId 指定された場合はその次のメッセージからイテレーターで取得できます
  * @returns 最初のメッセージを取得したら値を返します
  */
-async function createServerMessageFetcher(
+async function createMessageFetcher(
   abortController: AbortController,
   entryFetcher: EntryFetcher,
   skipToMetaId: string | undefined,
   backwardUri: { segment: string | undefined, snapshot: string | undefined; },
-): Promise<ServerMessageFetcher> {
+): Promise<MessageFetcher> {
   const signal = abortController.signal;
   const iteratorSet = AsyncIteratorSet.create<dwango.ChunkedMessage>({
     breaked: () => iteratorSet.close(),
@@ -497,7 +535,7 @@ async function createServerMessageFetcher(
     delayMs: number,
     maxSegmentCount: number,
     isSnapshot = false,
-  ): ReturnType<ServerMessageFetcher["getBackwardMessages"]> {
+  ): ReturnType<MessageFetcher["getBackwardMessages"]> {
     if (fetchingBackwardSegment) return undefined;
     const backwardUri = isSnapshot ? currentBackwardUri.snapshot : currentBackwardUri.segment;
     if (backwardUri == null) return;

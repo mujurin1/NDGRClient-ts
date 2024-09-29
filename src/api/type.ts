@@ -42,7 +42,7 @@ export interface NicolivePageData {
   readonly beginTime: number;
   /** 終了時刻 UNIX TIME (秒単位) */
   readonly endTime: number;
-  /** RELEASED: 予約中枠, BEFORE_RELEASE: 配信準備中 */
+  /** `RELEASED`: 予約中, `BEFORE_RELEASE`: 配信準備中 */
   readonly status: "RELEASED" | "BEFORE_RELEASE" | "ON_AIR" | "ENDED";
   /** 生放送の情報 */
   readonly nicoliveInfo: NicoliveInfo;
