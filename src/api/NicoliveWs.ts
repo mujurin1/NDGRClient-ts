@@ -1,6 +1,6 @@
 import { createAbortError, promiser, sleep } from "../lib/utils";
 import { connectWsAndAsyncIterable } from "../lib/websocket";
-import { type NicoliveStream, type NicoliveWsReceiveMessage, NicoliveWsSendMessage, type NicoliveWsSendPostComment } from "./NicoliveWsType";
+import { type NicoliveDisconectReason, type NicoliveStream, type NicoliveWsReceiveMessage, NicoliveWsSendMessage, type NicoliveWsSendPostComment } from "./NicoliveWsType";
 import type { NicolivePageData } from "./type";
 import { NicoliveAccessDeniedError, NicoliveWebSocketDisconnectError, NicoliveWebSocketReconnectError } from "./utils";
 
@@ -86,6 +86,7 @@ export const NicoliveWs = {
       ? Promise.resolve(reconnectData!.messageServerData)
       : messageServerDataPromiser.promise;
 
+    let _disconnectMessage: NicoliveDisconectReason | undefined;
     return {
       ws,
       iterator: iteratorSet.iterator,
@@ -126,7 +127,7 @@ export const NicoliveWs = {
         iteratorSet.throw(new NicoliveWebSocketReconnectError(message.data));
         ws.close();
       } else if (message.type === "disconnect") {
-        iteratorSet.throw(new NicoliveWebSocketDisconnectError(message.data.reason));
+        _disconnectMessage = message.data.reason;
       }
 
       iteratorSet.enqueue(message);
@@ -136,7 +137,10 @@ export const NicoliveWs = {
     function onClose() {
       signal.removeEventListener("abort", aborted);
       ws.close();
-      iteratorSet.close();
+
+      const disconnectError = NicoliveWebSocketDisconnectError.createIfError(_disconnectMessage);
+      if (disconnectError == null) iteratorSet.close();
+      else iteratorSet.throw(disconnectError);
     }
 
     function aborted() {

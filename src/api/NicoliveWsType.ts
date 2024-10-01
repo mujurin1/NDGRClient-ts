@@ -618,6 +618,10 @@ export const NicoliveDisconectReason = {
   serviceTemporarilyUnavailable: "SERVICE_TEMPORARILY_UNAVAILABLE",
 } as const;
 export type NicoliveDisconectReason = typeof NicoliveDisconectReason[keyof typeof NicoliveDisconectReason];
+export function getNicoliveDisconectReasonDescription(reason: NicoliveDisconectReason | undefined): string {
+  if (reason == null) return "終了メッセージを受信する前に切断された";
+  return NicoliveDisconectReasonDescription[reason];
+}
 export const NicoliveDisconectReasonDescription = {
   [NicoliveDisconectReason.takeover]: "追い出された",
   [NicoliveDisconectReason.noPermission]: "座席を取れなかった",

@@ -44,8 +44,8 @@ export async function connectWsAndAsyncIterable<
     ws.removeEventListener("message", onMessage);
     ws.removeEventListener("close", cleanupAndCloseIter);
     openPromiser.reject(`code:${event.code}  reason:${event.reason}`);
-    iteratorSet.close();
     closed?.();
+    iteratorSet.close();
   }
 }
 

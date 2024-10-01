@@ -1,7 +1,7 @@
 import { dwango } from "../_protobuf";
 import { getProps } from "../lib/utils";
 import { NicoliveUtility } from "./NicoliveUtility";
-import { NicoliveDisconectReasonDescription, type NicoliveCommentColor_Fixed, type NicoliveDisconectReason, type NicoliveWsReceiveReconnect } from "./NicoliveWsType";
+import { getNicoliveDisconectReasonDescription, NicoliveDisconectReason, type NicoliveCommentColor_Fixed, type NicoliveWsReceiveReconnect } from "./NicoliveWsType";
 import type { NicoliveId, NicoliveInfo, NicolivePageData, NicoliveUserData } from "./type";
 
 export function getNicoliveId(liveIdOrUrl: string): NicoliveId | undefined {
@@ -159,11 +159,21 @@ export class NicoliveWebSocketReconnectError extends Error {
  */
 export class NicoliveWebSocketDisconnectError extends Error {
   constructor(
-    public readonly reason: NicoliveDisconectReason,
+    public readonly reason: NicoliveDisconectReason | undefined,
   ) {
-    super(`ウェブソケットから切断されました. 理由:${NicoliveDisconectReasonDescription[reason]}`);
+    super(`ウェブソケットから切断されました. 理由:${getNicoliveDisconectReasonDescription(reason)}`);
     this.name = new.target.name;
     Object.setPrototypeOf(this, new.target.prototype);
+  }
+
+  /**
+   * ウェブソケットの終了理由が問題がある場合にエラーを生成する
+   * @param reason 理由
+   * @returns 生成されたエラー
+   */
+  static createIfError(reason: NicoliveDisconectReason | undefined): NicoliveWebSocketDisconnectError | undefined {
+    if (reason !== NicoliveDisconectReason.endProgram)
+      return new NicoliveWebSocketDisconnectError(reason);
   }
 }
 
