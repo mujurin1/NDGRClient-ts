@@ -484,10 +484,9 @@ async function createMessageFetcher(
       : value => {
 
         metaFilter(value);
-        return (
-          value.meta?.id === skipToMeta.id ||
-          (value.meta?.at != null && timestampLargeA(skipToMeta.at, value.meta.at))
-        ) ? [false, metaFilter] : false;
+        if (value.meta?.id === skipToMeta.id) return [false, metaFilter];
+        if (value.meta?.at != null && timestampLargeA(skipToMeta.at, value.meta.at)) return [true, metaFilter];
+        return false;
       },
   });
 
