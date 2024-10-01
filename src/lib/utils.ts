@@ -4,6 +4,18 @@ export function timestampToMs(timestamp: Timestamp) {
   return Number(timestamp.seconds) * 1e3 + timestamp.nanos / 1e6;
 }
 
+/**
+ * `a`より`b`の方が大きいか\
+ * 同じ場合は`false`を返す
+ * @returns `a`より`b`の方が大きいなら`true`
+ */
+export function timestampLargeA(a: Timestamp, b: Timestamp): boolean {
+  return (
+    a.seconds < b.seconds ||
+    (a.seconds === b.seconds && a.nanos < b.nanos)
+  );
+}
+
 export function throwIsNull<T>(value: T | undefined, errorMessage?: string): T {
   if (value == null) throw new Error(errorMessage);
   return value;

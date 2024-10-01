@@ -1,6 +1,7 @@
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import type { dwango } from "../_protobuf";
 import { AsyncIteratorSet } from "../lib/AsyncIteratorSet";
-import { isAbortError, promiser } from "../lib/utils";
+import { isAbortError, promiser, timestampLargeA } from "../lib/utils";
 import { NicoliveMessageServer, type NicoliveEntryAt } from "./NicoliveMessageServer";
 import { NicoliveWs, type MessageServerData, type NicoliveWsData, type WebSocketReconnectData } from "./NicoliveWs";
 import type { NicoliveCommentColor_Fixed, NicoliveStream, NicoliveWsReceiveMessage, NicoliveWsSendMessage, NicoliveWsSendPostComment } from "./NicoliveWsType";
@@ -158,7 +159,7 @@ export const NicoliveUtility = {
             abortController,
             {
               at: connectSet.entryFetcher.getLastEntryAt(),
-              skipToMetaId: connectSet.messageFetcher.getLastMeta()?.id,
+              skipToMeta: connectSet.messageFetcher.getLastMeta(),
               backwardUri: connectSet.messageFetcher.getBackwardUri(),
             });
         }),
@@ -177,7 +178,7 @@ export const NicoliveUtility = {
         segment: entryFetcher.backwardSegment.segment?.uri,
         snapshot: entryFetcher.backwardSegment.snapshot?.uri,
       };
-      const messageFetcher = await createMessageFetcher(abortController, entryFetcher, options?.skipToMetaId, backwardUri);
+      const messageFetcher = await createMessageFetcher(abortController, entryFetcher, options?.skipToMeta, backwardUri);
 
       return {
         promise: (async () => { await entryFetcher.promise; await messageFetcher.promise; })(),
@@ -341,9 +342,9 @@ export interface NicoliveMessageConnectorOptions {
    */
   readonly at: NicoliveEntryAt;
   /**
-   * 指定された場合はこのメタIDを持つメッセージまでスキップされます
+   * 指定された場合はこのメタIDと同じかより大きい時刻のメッセージを受信するまでスキップします
    */
-  readonly skipToMetaId?: string;
+  readonly skipToMeta?: (dwango.ChunkedMessage_Meta & { at: Timestamp; });
   /**
    * 指定された場合は次に取得する過去メッセージがこのURIからになります
    */
@@ -370,9 +371,10 @@ interface EntryFetcher extends IFetcher<dwango.MessageSegment> {
 }
 interface MessageFetcher extends IFetcher<dwango.ChunkedMessage> {
   /**
-   * 最後に取得した`dwango.ChunkedMessage_Meta`を取得します
+   * 最後に取得した`dwango.ChunkedMessage_Meta`を取得します\
+   * この値は必ず`meta.at`の値が存在します
    */
-  getLastMeta(): dwango.ChunkedMessage_Meta | undefined;
+  getLastMeta(): (dwango.ChunkedMessage_Meta & { at: Timestamp; }) | undefined;
   readonly getBackwardMessages: NicoliveMessageServerConnector["getBackwardMessages"];
   /**
    * 次に取得する過去メッセージのURIを取得します
@@ -465,27 +467,27 @@ async function createEntryFetcher(
  * @param abortController AbortController
  * @param entryFetcher EntryFetcher
  * @param backwardSegment 次に取得する過去メッセージのURI
- * @param skipToMetaId 指定された場合はその次のメッセージからイテレーターで取得できます
+ * @param skipToMeta 指定された場合はその次のメッセージからイテレーターで取得できます
  * @returns 最初のメッセージを取得したら値を返します
  */
 async function createMessageFetcher(
   abortController: AbortController,
   entryFetcher: EntryFetcher,
-  skipToMetaId: string | undefined,
+  skipToMeta: (dwango.ChunkedMessage_Meta & { at: Timestamp; }) | undefined,
   backwardUri: { segment: string | undefined, snapshot: string | undefined; },
 ): Promise<MessageFetcher> {
   const signal = abortController.signal;
   const iteratorSet = AsyncIteratorSet.create<dwango.ChunkedMessage>({
     breaked: () => iteratorSet.close(),
-    filter: skipToMetaId == null
+    filter: skipToMeta == null
       ? metaFilter
       : value => {
-        // skipToMetaId が残ったまま次のEntryに進むということはそのエントリ内の最後のメッセージだったので
-        // 以降はフィルター不要ということ
-        if (fetchedFirstEntry) return [true, metaFilter];
 
         metaFilter(value);
-        return value.meta?.id === skipToMetaId ? [false, metaFilter] : false;
+        return (
+          value.meta?.id === skipToMeta.id ||
+          (value.meta?.at != null && timestampLargeA(skipToMeta.at, value.meta.at))
+        ) ? [false, metaFilter] : false;
       },
   });
 
@@ -496,8 +498,7 @@ async function createMessageFetcher(
   let closed = false;
   let currentBackwardUri = backwardUri;
   let fetchingBackwardSegment = false;
-  let lastMeta: dwango.ChunkedMessage_Meta | undefined;
-  let fetchedFirstEntry = false;
+  let lastMeta: (dwango.ChunkedMessage_Meta & { at: Timestamp; }) | undefined;
 
   const firstPromiser = promiser();
   const promise = (async () => {
@@ -511,7 +512,6 @@ async function createMessageFetcher(
         if (checkCloseMessage(message)) return;
       }
       // ここまで firstPromiser.resolve を呼ぶためのコード分け
-      fetchedFirstEntry = true;
 
       for await (const segment of entryFetcher.iterator) {
         const { iterator } = await NicoliveMessageServer.fetchMessage(segment.uri, innerSignal);
@@ -544,8 +544,16 @@ async function createMessageFetcher(
   };
 
   function metaFilter(message: dwango.ChunkedMessage) {
-    if (message.meta != null) lastMeta = message.meta;
-    return true;
+    updateMeta(message);
+    return true;  // Filter は true を返すと値を除外しないのでここは常に true
+  }
+
+  function updateMeta(message: dwango.ChunkedMessage): boolean {
+    if (message.meta?.at != null) {
+      lastMeta = message.meta as typeof lastMeta;
+      return true;
+    }
+    return false;
   }
 
   function safeClose() {
@@ -573,6 +581,13 @@ async function createMessageFetcher(
         abortController.signal,
       );
       currentBackwardUri = { segment: backward.segmentUri, snapshot: backward.snapshotUri };
+
+      if (lastMeta == null) {
+        for (let i = backward.messages.length - 1; i >= 0; i--) {
+          const message = backward.messages[i];
+          if (updateMeta(message)) break;
+        }
+      }
 
       if (checkCloseMessage(backward.messages.at(-1))) {
         safeClose();
