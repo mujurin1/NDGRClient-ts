@@ -92,7 +92,7 @@ export class NicoliveLiveIdError extends Error {
     public readonly liveIdOrUrl: string,
   ) {
     super(`有効な放送IDを含んでいません. ${liveIdOrUrl}`);
-    this.name = new.target.name;
+    this.name = "NicoliveLiveIdError";
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
@@ -106,7 +106,7 @@ export class NicolivePageNotFoundError extends Error {
     public readonly liveId: NicoliveId,
   ) {
     super(`放送ページが存在しません. lv:${liveId}`);
-    this.name = new.target.name;
+    this.name = "NicolivePageNotFoundError";
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
@@ -120,7 +120,7 @@ export class NicolivePageParseError extends Error {
     public readonly innerError: unknown,
   ) {
     super(`放送ページの解析に失敗しました. url:${url}\n内部エラー:${innerError}`);
-    this.name = new.target.name;
+    this.name = "NicolivePageParseError";
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
@@ -133,7 +133,7 @@ export class NicoliveAccessDeniedError extends Error {
     public readonly pageData: NicolivePageData,
   ) {
     super(`放送が非公開または視聴する権限がありません. lv:${pageData.nicoliveInfo.liveId}`);
-    this.name = new.target.name;
+    this.name = "NicoliveAccessDeniedError";
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
@@ -149,7 +149,7 @@ export class NicoliveWebSocketReconnectError extends Error {
   ) {
     super(`ウェブソケット再接続要求を受け取りました`);
     this.reconnectTime = Date.now() + this.data.waitTimeSec * 1e3;
-    this.name = new.target.name;
+    this.name = "NicoliveWebSocketReconnectError";
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
@@ -162,7 +162,7 @@ export class NicoliveWebSocketDisconnectError extends Error {
     public readonly reason: NicoliveDisconectReason | undefined,
   ) {
     super(`ウェブソケットから切断されました. 理由:${getNicoliveDisconectReasonDescription(reason)}`);
-    this.name = new.target.name;
+    this.name = "NicoliveWebSocketDisconnectError";
     Object.setPrototypeOf(this, new.target.prototype);
   }
 
