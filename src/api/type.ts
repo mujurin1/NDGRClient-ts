@@ -81,7 +81,29 @@ export interface NicoliveInfo {
 
   /** 放送者コメントを送るためのトークン */
   readonly broadcasterCommentToken: string | undefined;
+
+  /** 接続に失敗した場合の失敗理由 */
+  readonly rejectedReasons: NicoliveRejectReason[];
 }
+
+/** ニコ生接続時のエラーメッセージ一覧 */
+export const NicoliveRejectReason = {
+  notLogin: "notLogin",
+  noTimeshiftProgram: "noTimeshiftProgram",
+  programNotBegun: "programNotBegun",
+  notHaveTimeshiftTicket: "notHaveTimeshiftTicket",
+  passwordAuthRequired: "passwordAuthRequired",
+} as const;
+export type NicoliveRejectReason = keyof typeof NicoliveRejectReason;
+
+/** ニコ生接続時のエラーメッセージの説明文 */
+export const NicoliveRejectReasonDisplay = {
+  notLogin: "ログインする必要があります",
+  noTimeshiftProgram: "タイムシフトが非公開です",
+  programNotBegun: "放送が始まっていません",
+  notHaveTimeshiftTicket: "放送を視聴する権限がありません",
+  passwordAuthRequired: "合言葉が必要です",
+} as const satisfies Record<NicoliveRejectReason, string>;
 
 /**
  * 放送の情報

@@ -187,7 +187,23 @@ export const NicoliveUtility = {
         messageFetcher,
       };
     }
-  }
+  },
+  /**
+   * ニコ生の合言葉を送ります
+   * @param liveId 放送ID
+   * @param password 合言葉
+   * @returns レスポンス
+   */
+  postPasswordAuth: (liveId: NicoliveId, password: string): Promise<Response> => {
+    return fetch(`https://live2.nicovideo.jp/unama/api/v2/programs/${liveId}/password/permission`, {
+      headers: {
+        "content-type": "application/json",
+        "x-niconico-session": "cookie"
+      },
+      body: `{"password":"${password}"}`,
+      method: "POST",
+    });
+  },
 } as const;
 
 export interface AbortAndPromise<T> {

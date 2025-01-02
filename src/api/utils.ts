@@ -58,6 +58,7 @@ export async function parseNicolivePageData(res: Response): Promise<NicolivePage
         provider: parseProvider(embedded),
         loginUser: parseLoginUser(embedded),
         broadcasterCommentToken: getProps(site, "relive", "csrfToken"),
+        rejectedReasons: getProps(embedded, "userProgramWatch", "rejectedReasons"),
       },
       postBroadcasterComment,
       deleteBroadcasterComment,
