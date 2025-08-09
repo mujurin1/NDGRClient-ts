@@ -137,7 +137,7 @@ async function* sizeDelimitedDecodeStream<Desc extends protobuf.DescMessage>(
   options?: protobuf.BinaryReadOptions,
 ) {
   // append chunk to buffer, returning updated buffer
-  function append(buffer: Uint8Array, chunk: Uint8Array): Uint8Array {
+  function append(buffer: Uint8Array, chunk: Uint8Array): Uint8Array<ArrayBuffer> {
     const n = new Uint8Array(buffer.byteLength + chunk.byteLength);
     n.set(buffer);
     n.set(chunk, buffer.length);
