@@ -115,13 +115,10 @@ export class EventEmitter<Events extends Record<string, readonly unknown[]>> imp
   private _debugCallbacks?: Set<any>;
 
   /**
-   * デバッグ用
-   * 
+   * (デバッグ用)\
    * 全てのメッセージを受信するイベントを登録します
    */
-  public _debugAllOn(
-    listener: DebugListener<Events>
-  ) {
+  public _debugAllOn(listener: DebugListener<Events>) {
     if (this._debugCallFromEmit == null) {
       this._debugCallbacks = new Set();
       this._debugCallFromEmit = (event, data) => {
