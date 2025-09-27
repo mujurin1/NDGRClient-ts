@@ -1,4 +1,4 @@
-import type { GenMessage } from "@bufbuild/protobuf/codegenv1";
+import type { GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { dwango, protobuf } from "../_protobuf";
 import { isAbortError, sleep } from "../lib/utils";
 import { ResponseIteratorSet } from "../lib/websocket";
