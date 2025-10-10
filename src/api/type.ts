@@ -86,29 +86,35 @@ export interface NicoliveInfo {
   readonly rejectedReasons: NicoliveRejectReason[];
 }
 
-/** ニコ生接続時のエラーメッセージ一覧 */
+/**
+ * ニコ生接続時のエラーメッセージ一覧\
+ * ※ 昔は embedded に埋め込まれていたが、無くなったのでカスタムな値として流用
+ */
 export const NicoliveRejectReason = {
-  notLogin: "notLogin",
+  needLogin: "needLogin",
   noTimeshiftProgram: "noTimeshiftProgram",
   programNotBegun: "programNotBegun",
   notHaveTimeshiftTicket: "notHaveTimeshiftTicket",
   passwordAuthRequired: "passwordAuthRequired",
+  unknown: "unknown",
 } as const;
 export type NicoliveRejectReason = keyof typeof NicoliveRejectReason;
 
 /** ニコ生接続時のエラーメッセージの説明文 */
 export const NicoliveRejectReasonDisplay = {
-  notLogin: "ログインする必要があります",
-  noTimeshiftProgram: "タイムシフトが非公開です",
+  needLogin: "ログインする必要があります",
+  // MEMO: タイムシフトが非公開な場合は値がない。というチェックしか出来ないため。確定しない
+  noTimeshiftProgram: "タイムシフトが非公開な可能性があります",
   programNotBegun: "放送が始まっていません",
   notHaveTimeshiftTicket: "放送を視聴する権限がありません",
   passwordAuthRequired: "合言葉が必要です",
+  unknown: "不明 ※直接放送ページを開いて確認してください※",
 } as const satisfies Record<NicoliveRejectReason, string>;
 
 /**
  * 放送の情報
  */
-export type NicoliveProvider = NicoliveProviderUser | NicoliveProviderOfficial | NicoliveProviderChannel;
+export type NicoliveProvider = NicoliveProviderUser | NicoliveProviderOfficial | NicoliveProviderChannel | NicoliveProviderUnknown;
 export type NicoliveInfoProviderType = NicoliveProvider["type"];
 
 /**
@@ -120,7 +126,7 @@ export interface NicoliveProviderUser {
   readonly id: string;
   /** 放送者名 */
   readonly name: string;
-};
+}
 /**
  * 公式放送
  */
@@ -132,7 +138,7 @@ export interface NicoliveProviderOfficial {
   readonly name: string;
   /** 会社名 */
   readonly companyName: "株式会社ドワンゴ";
-};
+}
 /**
  * チャンネル放送
  */
@@ -144,7 +150,13 @@ export interface NicoliveProviderChannel {
   readonly name: string;
   /** 会社名 */
   readonly companyName: string;
-};
+}
+/**
+ * 不明な放送
+ */
+export interface NicoliveProviderUnknown {
+  readonly type: "unknown";
+}
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-definitions
 export type NicoliveClientLog = {

@@ -2,7 +2,7 @@ import { dwango } from "../_protobuf";
 import { getProps } from "../lib/utils";
 import { NicoliveUtility } from "./NicoliveUtility";
 import { getNicoliveDisconectReasonDescription, NicoliveDisconectReason, type NicoliveCommentColor_Fixed, type NicoliveWsReceiveReconnect } from "./NicoliveWsType";
-import type { NicoliveId, NicoliveInfo, NicolivePageData, NicoliveUserData } from "./type";
+import { NicoliveRejectReason, type NicoliveId, type NicoliveInfo, type NicolivePageData, type NicoliveUserData } from "./type";
 
 export function getNicoliveId(liveIdOrUrl: string): NicoliveId | undefined {
   const liveIdRegex = /.*((lv|ch|user\/)\d+).*/;
@@ -41,24 +41,27 @@ export async function parseNicolivePageData(res: Response): Promise<NicolivePage
       .getAttribute("data-props")!;
     const embedded = JSON.parse(embeddedString);
 
-    const site = getProps(embedded, "site");
-    const program = getProps(embedded, "program");
+    const site = getProps(embedded, ["site"]);
+    const program = getProps(embedded, ["program"]);
 
-    const liveId = getProps(program, "nicoliveProgramId");
-    const broadcasterCommentToken = getProps(site, "relive", "csrfToken");
+    const liveId = getProps(program, ["nicoliveProgramId"]);
+    const broadcasterCommentToken = getProps(site, ["relive", "csrfToken"]);
+
+    const websocketUrl = getProps(site, ["relive", "webSocketUrl"]);
     return {
-      websocketUrl: getProps(site, "relive", "webSocketUrl"),
-      beginTime: getProps(program, "beginTime"),
-      endTime: getProps(program, "endTime"),
-      status: getProps(program, "status"),
+      websocketUrl,
+      beginTime: getProps(program, ["beginTime"], -1),
+      endTime: getProps(program, ["endTime"], -1),
+      status: getProps(program, ["status"], "ON_AIR"),
 
       nicoliveInfo: {
         liveId,
-        title: getProps(program, "title"),
+        title: getProps(program, ["title"]),
         provider: parseProvider(embedded),
         loginUser: parseLoginUser(embedded),
-        broadcasterCommentToken: getProps(site, "relive", "csrfToken"),
-        rejectedReasons: getProps(embedded, "userProgramWatch", "rejectedReasons"),
+        broadcasterCommentToken: getProps(site, ["relive", "csrfToken"], ""),
+        // 念の為のガード. websocketUrl があればコメントは接続可能
+        rejectedReasons: websocketUrl ? [] : parseReasons(embedded),
       },
       postBroadcasterComment,
       deleteBroadcasterComment,
@@ -180,50 +183,85 @@ export class NicoliveWebSocketDisconnectError extends Error {
 
 
 function parseProvider(embedded: any): NicoliveInfo["provider"] {
-  const program = getProps(embedded, "program");
-  const socialGroup = getProps(embedded, "socialGroup");
-  const supplier = getProps(program, "supplier");
+  try {
+    const program = getProps(embedded, ["program"]);
+    const socialGroup = getProps(embedded, ["socialGroup"]);
+    const supplier = getProps(program, ["supplier"]);
 
-  // program.providerType の "community" は "user" として扱う
-  const providerType: "community" | "official" | "channel" =
-    getProps(program, "providerType");
+    // program.providerType の "community" は "user" として扱う
+    const providerType: "community" | "official" | "channel" =
+      getProps(program, ["providerType"]);
 
-  if (providerType === "community") {
-    return {
-      type: "user",
-      id: getProps(supplier, "programProviderId") + "",
-      name: getProps(supplier, "name"),
-    };
-  } else if (providerType === "official") {
-    return {
-      type: "official",
-      id: getProps(socialGroup, "id"),
-      name: getProps(socialGroup, "name"),
-      companyName: getProps(socialGroup, "companyName"),
-    };
-  } else {
-    return {
-      type: "channel",
-      id: getProps(socialGroup, "id"),
-      name: getProps(socialGroup, "name"),
-      companyName: getProps(socialGroup, "companyName"),
-    };
+    if (providerType === "community") {
+      return {
+        type: "user",
+        id: getProps(supplier, ["programProviderId"]) + "",
+        name: getProps(supplier, ["name"]),
+      };
+    } else if (providerType === "official") {
+      return {
+        type: "official",
+        id: getProps(socialGroup, ["id"]),
+        name: getProps(socialGroup, ["name"]),
+        companyName: getProps(socialGroup, ["companyName"]),
+      };
+    } else {
+      return {
+        type: "channel",
+        id: getProps(socialGroup, ["id"]),
+        name: getProps(socialGroup, ["name"]),
+        companyName: getProps(socialGroup, ["companyName"]),
+      };
+    }
+  } catch (e) {
+    console.warn("放送の情報の解析に失敗しました", e);
+    return { type: "unknown" };
   }
 }
 
 function parseLoginUser(embedded: any): NicoliveUserData | undefined {
   const user = embedded.user; // undefined の可能性有り
-
-  if (user?.isLoggedIn !== true) return undefined;
-  const creatorCreatorSupportSummary = getProps(embedded, "creatorCreatorSupportSummary");
+  if (user?.isLoggedIn === undefined) {
+    console.warn("embedded.user.isLoggedIn が存在しません");
+    return undefined;
+  }
+  if (user.isLoggedIn) return undefined;
+  const creatorCreatorSupportSummary = getProps(embedded, ["creatorCreatorSupportSummary"]);
 
   return {
-    id: getProps(user, "id") + "",
-    name: getProps(user, "nickname"),
-    isPremium: getProps(user, "accountType") === "premium",
-    isBroadcaster: getProps(user, "isBroadcaster"),
+    id: getProps(user, ["id"]) + "",
+    name: getProps(user, ["nickname"]),
+    isPremium: getProps(user, ["accountType"]) === "premium",
+    isBroadcaster: getProps(user, ["isBroadcaster"]),
     /** isBroadcaster:true の場合は false */
-    isOperator: getProps(user, "isOperator"),
+    isOperator: getProps(user, ["isOperator"]),
     isSupportable: creatorCreatorSupportSummary?.isSupportable === true,
   };
+}
+
+function parseReasons(embedded: any): NicoliveRejectReason[] {
+  const reasons: NicoliveRejectReason[] = [];
+  const canWatch = getProps(embedded, ["userProgramWatch", "canWatch"], true);
+  if (canWatch === true) return reasons;
+  debugger;
+
+  if (getProps(embedded, ["programWatch", "condition", "needLogin"], false) === true) {
+    reasons.push(NicoliveRejectReason.needLogin);
+  }
+  const timeshiftStatus = getProps(embedded, ["programTimeshift", "publication", "status"], null);
+  switch (timeshiftStatus) {
+    case "Open": break;
+    case "Before": reasons.push(NicoliveRejectReason.programNotBegun); break;
+    default: reasons.push(NicoliveRejectReason.noTimeshiftProgram); break;
+  }
+
+  if (!getProps(embedded, ["userProgramWatch", "passwordAuth", "isAuthorized"], true)) {
+    reasons.push(NicoliveRejectReason.passwordAuthRequired);
+  }
+
+  if (reasons.length === 0) {
+    reasons.push(NicoliveRejectReason.unknown);
+  }
+
+  return reasons;
 }

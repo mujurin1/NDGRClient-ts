@@ -89,12 +89,18 @@ export function promiser<T = void>() {
  * @param object 取り出すオブジェクト
  * @param props 辿る階層の名前
  * @returns 
- * @throws 値が`undefined`/`null`だった場合
+ * @throws 値が`undefined`だった場合
  */
-export function getProps(object: any, ...props: string[]): any {
+export function getProps(object: any, props: string[], defaultValue?: any): any {
   for (const prop of props) {
     if (object == null) break;
     object = object[prop];
   }
-  return throwIsNull(object, `値が存在しません: ${props.join(".")}`);
+
+  if (object !== undefined) return object;
+  if (defaultValue !== undefined) {
+    console.warn(`値が存在しないので代替値を使用します: ${props.join(".")}`, defaultValue);
+    return defaultValue;
+  }
+  throw new Error(`値が存在しません: ${props.join(".")}`);
 }
