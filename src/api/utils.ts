@@ -220,12 +220,13 @@ function parseProvider(embedded: any): NicoliveInfo["provider"] {
 }
 
 function parseLoginUser(embedded: any): NicoliveUserData | undefined {
+  debugger;
   const user = embedded.user; // undefined の可能性有り
   if (user?.isLoggedIn === undefined) {
     console.warn("embedded.user.isLoggedIn が存在しません");
     return undefined;
   }
-  if (user.isLoggedIn) return undefined;
+  if (!user.isLoggedIn) return undefined;
   const creatorCreatorSupportSummary = getProps(embedded, ["creatorCreatorSupportSummary"]);
 
   return {
